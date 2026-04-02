@@ -1,0 +1,617 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Window
+    x:Class="ShepherdConfigurator.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="ShepherdPatch Configurator"
+    mc:Ignorable="d">
+    <Window.SystemBackdrop>
+        <MicaBackdrop Kind="BaseAlt" />
+    </Window.SystemBackdrop>
+
+    <Grid x:Name="WindowRoot" Background="{StaticResource HomecomingBackgroundBrush}">
+        <Border
+            x:Name="ShellBorder"
+            Margin="14"
+            Background="{StaticResource HomecomingShellBrush}"
+            BorderBrush="{StaticResource HomecomingSurfaceBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="6">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="8" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Background="{StaticResource HomecomingAccentBrush}" />
+
+                <Border
+                    Grid.Row="1"
+                    Background="{StaticResource HomecomingHeaderBrush}"
+                    BorderBrush="{StaticResource HomecomingSurfaceBorderBrush}"
+                    BorderThickness="0,0,0,1"
+                    Padding="14,10">
+                    <Grid ColumnSpacing="14" RowSpacing="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel
+                            Grid.RowSpan="2"
+                            Orientation="Horizontal"
+                            Spacing="10"
+                            VerticalAlignment="Top">
+                            <Image
+                                Width="28"
+                                Height="28"
+                                Margin="0,1,0,0"
+                                Source="ms-appx:///Assets/ConfiguratorGlyph.png"
+                                Stretch="Uniform" />
+                            <StackPanel MaxWidth="500" Spacing="1">
+                                <TextBlock Style="{StaticResource RailKickerTextStyle}" Text="Silent Hill Homecoming" />
+                                <TextBlock Style="{StaticResource HeaderTitleTextStyle}" Text="ShepherdPatch Configurator" />
+                                <TextBlock
+                                    x:Name="ContextSummaryText"
+                                    Style="{StaticResource RailMetaTextStyle}"
+                                    Text="Loading current configuration state" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <Border
+                            Grid.Column="1"
+                            Background="{StaticResource HomecomingSurfaceBrush}"
+                            BorderBrush="{StaticResource HomecomingSurfaceBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="4"
+                            Padding="9,7"
+                            VerticalAlignment="Top">
+                            <StackPanel Spacing="3">
+                                <TextBlock Style="{StaticResource RailKickerTextStyle}" Text="Active INI" />
+                                <TextBlock
+                                    x:Name="ConfigPathText"
+                                    Width="300"
+                                    Style="{StaticResource RailMetaTextStyle}"
+                                    Text="Path unavailable"
+                                    TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Border>
+
+                        <StackPanel
+                            x:Name="HeaderCommandBar"
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            HorizontalAlignment="Right"
+                            Orientation="Horizontal"
+                            Spacing="6"
+                            VerticalAlignment="Bottom">
+                            <Border
+                                x:Name="DirtyIndicator"
+                                Background="{StaticResource HomecomingSurfaceInsetBrush}"
+                                BorderBrush="{StaticResource HomecomingSurfaceBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                Padding="10,6">
+                                <TextBlock
+                                    x:Name="DirtyIndicatorText"
+                                    Style="{StaticResource StatusTextStyle}"
+                                    Text="No pending changes" />
+                            </Border>
+                            <Border
+                                x:Name="ExperimentalNotice"
+                                Background="{StaticResource HomecomingSurfaceInsetBrush}"
+                                BorderBrush="{StaticResource HomecomingAccentBrush}"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                Padding="10,6"
+                                Visibility="Collapsed">
+                                <TextBlock
+                                    x:Name="ExperimentalNoticeText"
+                                    Style="{StaticResource StatusTextStyle}"
+                                    Text="Experimental options visible" />
+                            </Border>
+                            <TextBox
+                                x:Name="SearchBox"
+                                Width="240"
+                                PlaceholderText="Search settings"
+                                Style="{StaticResource HomecomingTextBoxStyle}"
+                                TextChanged="SearchBox_TextChanged" />
+                            <Button
+                                x:Name="DiscardButton"
+                                Click="DiscardButton_Click"
+                                Content="Discard"
+                                Style="{StaticResource HomecomingButtonStyle}" />
+                            <Button
+                                x:Name="SaveButton"
+                                Click="SaveButton_Click"
+                                Content="Save"
+                                Style="{StaticResource HomecomingAccentButtonStyle}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <Border
+                    Grid.Row="2"
+                    Background="{StaticResource HomecomingRailBrush}"
+                    BorderBrush="{StaticResource HomecomingSurfaceBorderBrush}"
+                    BorderThickness="0,0,0,1"
+                    Padding="12,8">
+                    <ScrollViewer
+                        HorizontalScrollBarVisibility="Hidden"
+                        HorizontalScrollMode="Enabled"
+                        VerticalScrollBarVisibility="Disabled"
+                        VerticalScrollMode="Disabled"
+                        ZoomMode="Disabled">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Button x:Name="AllCategoryButton" Click="CategoryButton_Click" Content="All settings" Style="{StaticResource HomecomingTopNavButtonStyle}" Tag="All" />
+                            <Button x:Name="DisplayCategoryButton" Click="CategoryButton_Click" Content="Display" Style="{StaticResource HomecomingTopNavButtonStyle}" Tag="Display" />
+                            <Button x:Name="InputCategoryButton" Click="CategoryButton_Click" Content="Input" Style="{StaticResource HomecomingTopNavButtonStyle}" Tag="Input" />
+                            <Button x:Name="FrameRateCategoryButton" Click="CategoryButton_Click" Content="Frame rate" Style="{StaticResource HomecomingTopNavButtonStyle}" Tag="Frame Rate" />
+                            <Button x:Name="StabilityCategoryButton" Click="CategoryButton_Click" Content="Stability" Style="{StaticResource HomecomingTopNavButtonStyle}" Tag="Stability" />
+                            <Button x:Name="MoviesCategoryButton" Click="CategoryButton_Click" Content="Movies" Style="{StaticResource HomecomingTopNavButtonStyle}" Tag="Movies" />
+                            <Button x:Name="AdvancedCategoryButton" Click="CategoryButton_Click" Content="Advanced" Style="{StaticResource HomecomingTopNavButtonStyle}" Tag="Advanced" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+
+                <Border
+                    x:Name="DependencyBanner"
+                    Grid.Row="3"
+                    Margin="12,10,12,0"
+                    Background="{StaticResource HomecomingSurfaceBrush}"
+                    BorderBrush="{StaticResource HomecomingAccentBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Padding="12,10"
+                    Visibility="Collapsed">
+                    <Grid ColumnSpacing="10" RowSpacing="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Spacing="2">
+                            <TextBlock
+                                x:Name="DependencyBannerTitleText"
+                                Style="{StaticResource SectionTitleTextStyle}"
+                                Text="Required setup items missing" />
+                            <TextBlock
+                                x:Name="DependencyBannerText"
+                                Style="{StaticResource SettingDescriptionTextStyle}"
+                                Text="Required mod files are missing from the game install." />
+                        </StackPanel>
+
+                        <StackPanel
+                            Grid.Column="1"
+                            Grid.RowSpan="2"
+                            HorizontalAlignment="Right"
+                            Orientation="Horizontal"
+                            Spacing="6"
+                            VerticalAlignment="Center">
+                            <Button
+                                x:Name="OpenDependencyInstallFolderButton"
+                                Click="OpenDependencyInstallFolderButton_Click"
+                                Content="Open game Bin"
+                                Style="{StaticResource HomecomingButtonStyle}" />
+                            <Button
+                                x:Name="OpenBundledDependenciesButton"
+                                Click="OpenBundledDependenciesButton_Click"
+                                Content="Open bundled files"
+                                Style="{StaticResource HomecomingButtonStyle}" />
+                            <Button
+                                x:Name="DownloadRuntimeDependenciesButton"
+                                Click="DownloadRuntimeDependenciesButton_Click"
+                                Content="Download requirements"
+                                Style="{StaticResource HomecomingButtonStyle}"
+                                Visibility="Collapsed" />
+                            <Button
+                                x:Name="RefreshDependenciesButton"
+                                Click="RefreshDependenciesButton_Click"
+                                Content="Refresh"
+                                Style="{StaticResource HomecomingAccentButtonStyle}" />
+                        </StackPanel>
+
+                        <TextBlock
+                            x:Name="DependencyPathText"
+                            Grid.Row="1"
+                            Style="{StaticResource RailMetaTextStyle}"
+                            Text="Install path unavailable" />
+                    </Grid>
+                </Border>
+
+                <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto">
+                            <Grid Padding="12">
+                                <Grid
+                                    x:Name="CardsGrid"
+                                    ColumnSpacing="10"
+                                    RowSpacing="8">
+                                <Border
+                                    x:Name="DisplayCard"
+                                    Style="{StaticResource SettingsPanelStyle}">
+                                    <StackPanel>
+                                        <Grid Style="{StaticResource SectionHeaderGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="Display" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                HorizontalAlignment="Right"
+                                                Style="{StaticResource SectionCaptionTextStyle}"
+                                                Text="Aspect, borderless, refresh, presentation" />
+                                        </Grid>
+
+                                        <Grid x:Name="DisplayRowOne" Style="{StaticResource SettingRowGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="220" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <CheckBox x:Name="EnableSafeResolutionChangesToggle" Click="AnySettingChanged" Content="Safe resolution changes" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Applies resolution and mode changes through the safer patched path." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Width="220">
+                                                <CheckBox x:Name="EnableDpiAwarenessToggle" Click="AnySettingChanged" Content="DPI awareness" HorizontalAlignment="Right" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Keeps the game rendering at the correct scale on high-DPI desktops." TextAlignment="Right" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid x:Name="DisplayRowTwo" Style="{StaticResource SettingRowGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="220" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <CheckBox x:Name="EnableUltrawideFovFixToggle" Click="AnySettingChanged" Content="Ultrawide FOV fix" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Corrects gameplay framing for wider-than-16:9 displays." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Width="220">
+                                                <CheckBox x:Name="ForceBorderlessToggle" Click="AnySettingChanged" Content="Force borderless" HorizontalAlignment="Right" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Uses a borderless desktop window instead of the game’s old fullscreen path." TextAlignment="Right" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid x:Name="DisplayRowThree" Style="{StaticResource SettingRowGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="220" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <CheckBox x:Name="RetryResetInWindowedModeToggle" Click="AnySettingChanged" Content="Retry reset in windowed mode" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Retries device reset in the safer windowed path before escalating." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Width="220">
+                                                <CheckBox x:Name="EnableHudViewportClampToggle" Click="AnySettingChanged" Content="HUD viewport clamp" HorizontalAlignment="Right" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Prevents HUD elements from drifting beyond the intended visible area." TextAlignment="Right" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid x:Name="DisplayRowFour" Style="{StaticResource SettingRowGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="220" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <CheckBox x:Name="ReduceBorderlessPresentStutterToggle" Click="AnySettingChanged" Content="Reduce borderless present stutter" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Uses the patched presentation policy intended to reduce compositor misses." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Width="220">
+                                                <CheckBox x:Name="EnableFlipExSwapEffectToggle" Click="AnySettingChanged" Content="Use D3D9Ex flip model" HorizontalAlignment="Right" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Enables the modern flip presentation path when the device supports it." TextAlignment="Right" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid x:Name="DisplayValuesGrid" Style="{StaticResource ValuesGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Style="{StaticResource SettingLabelTextStyle}" Text="HUD aspect ratio" />
+                                                <NumberBox x:Name="HudViewportAspectRatioBox" Minimum="1" SmallChange="0.01" SpinButtonPlacementMode="Compact" ValueChanged="AnyNumberChanged" />
+                                                <TextBlock Style="{StaticResource ValueDescriptionTextStyle}" Text="Sets the aspect ratio used when clamping HUD placement." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Style="{StaticResource SettingLabelTextStyle}" Text="Fallback refresh rate" />
+                                                <NumberBox x:Name="FallbackRefreshRateBox" Minimum="0" SpinButtonPlacementMode="Compact" ValueChanged="AnyNumberChanged" />
+                                                <TextBlock Style="{StaticResource ValueDescriptionTextStyle}" Text="Used when the game asks for a bad or unsupported fullscreen refresh." />
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border
+                                    x:Name="InputCard"
+                                    Style="{StaticResource SettingsPanelStyle}">
+                                    <StackPanel>
+                                        <Grid Style="{StaticResource SectionHeaderGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="Input" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                HorizontalAlignment="Right"
+                                                Style="{StaticResource SectionCaptionTextStyle}"
+                                                Text="Raw mouse, invert, DirectInput cleanup" />
+                                        </Grid>
+
+                                        <Grid x:Name="InputRowOne" Style="{StaticResource SettingRowGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="220" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <CheckBox x:Name="EnableRawMouseInputToggle" Click="AnySettingChanged" Content="Enable raw mouse input" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Feeds mouse movement through the raw input path instead of the legacy game path." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Width="220">
+                                                <CheckBox x:Name="InvertRawMouseYToggle" Click="AnySettingChanged" Content="Invert raw mouse Y" HorizontalAlignment="Right" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Flips vertical mouse look for players who prefer inverted controls." TextAlignment="Right" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid x:Name="InputRowTwo" Style="{StaticResource SettingRowGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="220" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <CheckBox x:Name="HardenDirectInputMouseDeviceToggle" Click="AnySettingChanged" Content="Harden DirectInput mouse device (Experimental)" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Experimental. Normalizes mouse reacquire behavior during focus changes and alt-tab." />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid x:Name="InputValuesGrid" Style="{StaticResource ValuesGridStyle}" Margin="0,14,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Style="{StaticResource SettingLabelTextStyle}" Text="Raw mouse sensitivity" />
+                                                <NumberBox x:Name="RawMouseSensitivityBox" Minimum="0" SmallChange="0.05" SpinButtonPlacementMode="Compact" ValueChanged="AnyNumberChanged" />
+                                                <TextBlock Style="{StaticResource ValueDescriptionTextStyle}" Text="Multiplier applied to raw mouse movement before it reaches the game." />
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border
+                                    x:Name="FrameRateCard"
+                                    Style="{StaticResource SettingsPanelStyle}">
+                                    <StackPanel>
+                                        <Grid Style="{StaticResource SectionHeaderGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="Frame Rate" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                HorizontalAlignment="Right"
+                                                Style="{StaticResource SectionCaptionTextStyle}"
+                                                Text="Cap, interval, wake lead, V-Sync" />
+                                        </Grid>
+
+                                        <Grid x:Name="FrameRateRowOne" Style="{StaticResource SettingRowGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="220" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <CheckBox x:Name="EnableFrameRateUnlockToggle" Click="AnySettingChanged" Content="Enable frame rate unlock" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Enables the patched engine timing and presentation path above the stock 30 FPS cap." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Width="220">
+                                                <CheckBox x:Name="DisableVsyncToggle" Click="AnySettingChanged" Content="Disable V-Sync" HorizontalAlignment="Right" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Prevents the game from waiting on monitor sync before presenting a frame." TextAlignment="Right" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid x:Name="FrameRateValuesGrid" Style="{StaticResource ValuesGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Style="{StaticResource SettingLabelTextStyle}" Text="Target frame rate" />
+                                                <NumberBox x:Name="TargetFrameRateBox" Minimum="0" SpinButtonPlacementMode="Compact" ValueChanged="AnyNumberChanged" />
+                                                <TextBlock Style="{StaticResource ValueDescriptionTextStyle}" Text="0 leaves the patch effectively uncapped; any other value becomes the target cap." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Style="{StaticResource SettingLabelTextStyle}" Text="Max present interval" />
+                                                <NumberBox x:Name="MaximumPresentationIntervalBox" Minimum="0" SpinButtonPlacementMode="Compact" ValueChanged="AnyNumberChanged" />
+                                                <TextBlock Style="{StaticResource ValueDescriptionTextStyle}" Text="Upper limit for the presentation interval the patch allows the game to request." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2">
+                                                <TextBlock Style="{StaticResource SettingLabelTextStyle}" Text="Wake lead (ms)" />
+                                                <NumberBox x:Name="PresentWakeLeadMillisecondsBox" Minimum="0" SmallChange="0.05" SpinButtonPlacementMode="Compact" ValueChanged="AnyNumberChanged" />
+                                                <TextBlock Style="{StaticResource ValueDescriptionTextStyle}" Text="How early the scheduler wakes before the next intended present deadline." />
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border
+                                    x:Name="StabilityCard"
+                                    Style="{StaticResource SettingsPanelStyle}">
+                                    <StackPanel>
+                                        <Grid Style="{StaticResource SectionHeaderGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="Stability" />
+                                            <TextBlock Grid.Column="1" HorizontalAlignment="Right" Style="{StaticResource SectionCaptionTextStyle}" Text="Timing, dumps, MMCSS, power policy" />
+                                        </Grid>
+
+                                        <Grid x:Name="StabilityRowOne" Style="{StaticResource SettingRowGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="220" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <CheckBox x:Name="EnableHighPrecisionTimingToggle" Click="AnySettingChanged" Content="High precision timing" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Uses high-resolution timing APIs where the patch has a choice." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Width="220">
+                                                <CheckBox x:Name="RequestHighResolutionTimerToggle" Click="AnySettingChanged" Content="High resolution timer" HorizontalAlignment="Right" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Requests a tighter system timer granularity for patched sleeps and waits." TextAlignment="Right" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid x:Name="StabilityRowTwo" Style="{StaticResource SettingRowGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="220" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <CheckBox x:Name="EnablePreciseSleepShimToggle" Click="AnySettingChanged" Content="Precise sleep shim" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Replaces coarse sleeps with a more accurate patched waiting strategy." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Width="220">
+                                                <CheckBox x:Name="EnableCrashDumpsToggle" Click="AnySettingChanged" Content="Crash dumps" HorizontalAlignment="Right" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Captures crash dumps for patch and engine failures." TextAlignment="Right" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid x:Name="StabilityRowThree" Style="{StaticResource SettingRowGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="220" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <CheckBox x:Name="SynchronizeEngineVarsToggle" Click="AnySettingChanged" Content="Synchronize engine vars" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Keeps selected in-game engine values aligned with the patch configuration." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Width="220">
+                                                <CheckBox x:Name="EnableGamesMmcssProfileToggle" Click="AnySettingChanged" Content="MMCSS Games profile" HorizontalAlignment="Right" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Raises the render thread into the Games MMCSS class when available." TextAlignment="Right" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid x:Name="StabilityRowFour" Style="{StaticResource SettingRowGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="220" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <CheckBox x:Name="DisablePowerThrottlingToggle" Click="AnySettingChanged" Content="Disable power throttling" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Asks Windows not to down-prioritize critical game threads to save power." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Width="220">
+                                                <TextBlock Style="{StaticResource SectionCaptionTextStyle}" HorizontalAlignment="Right" Text="Crash safety and scheduling" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border
+                                    x:Name="AdvancedCard"
+                                    Style="{StaticResource SettingsPanelStyle}">
+                                    <StackPanel>
+                                        <Grid Style="{StaticResource SectionHeaderGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="Advanced" />
+                                            <TextBlock Grid.Column="1" HorizontalAlignment="Right" Style="{StaticResource SectionCaptionTextStyle}" Text="Legacy runtime hardening" />
+                                        </Grid>
+
+                                        <Grid x:Name="AdvancedRowOne" Style="{StaticResource SettingRowGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="220" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <CheckBox x:Name="DisableLegacyPeriodicIconicTimerToggle" Click="AnySettingChanged" Content="Disable iconic timer (Experimental)" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Experimental. Suppresses the old 33 ms periodic iconic window timer if the game uses it." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Width="220">
+                                                <CheckBox x:Name="ReduceLegacyWaitableTimerPollingToggle" Click="AnySettingChanged" Content="Reduce waitable timer polling" HorizontalAlignment="Right" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Redirects a legacy polling loop onto the timer it should have been waiting on." TextAlignment="Right" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid x:Name="AdvancedRowTwo" Style="{StaticResource SettingRowGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="220" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <CheckBox x:Name="HardenLegacyGraphicsRecoveryToggle" Click="AnySettingChanged" Content="Harden graphics recovery (Experimental)" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Experimental. Softens the old graphics retry behavior and keeps the modern reset path in control." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Width="220">
+                                                <CheckBox x:Name="HardenLegacyThreadWrapperToggle" Click="AnySettingChanged" Content="Harden thread wrapper (Experimental)" HorizontalAlignment="Right" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Experimental. Makes the old suspend/terminate thread wrapper less crash-prone." TextAlignment="Right" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid x:Name="AdvancedValuesGrid" Style="{StaticResource ValuesGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Style="{StaticResource SettingLabelTextStyle}" Text="Graphics retry delay (ms)" />
+                                                <NumberBox x:Name="LegacyGraphicsRetryDelayMillisecondsBox" Minimum="0" SpinButtonPlacementMode="Compact" ValueChanged="AnyNumberChanged" />
+                                                <TextBlock Style="{StaticResource ValueDescriptionTextStyle}" Text="Delay used when the old graphics recovery loop retries after a failure." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Style="{StaticResource SettingLabelTextStyle}" Text="Thread terminate grace (ms)" />
+                                                <NumberBox x:Name="LegacyThreadTerminateGraceMillisecondsBox" Minimum="0" SpinButtonPlacementMode="Compact" ValueChanged="AnyNumberChanged" />
+                                                <TextBlock Style="{StaticResource ValueDescriptionTextStyle}" Text="How long the patch waits before falling back to forced thread termination." />
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border
+                                    x:Name="MoviesCard"
+                                    Style="{StaticResource SettingsPanelStyle}">
+                                    <StackPanel>
+                                        <Grid Style="{StaticResource SectionHeaderGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="Movies" />
+                                            <TextBlock Grid.Column="1" HorizontalAlignment="Right" Style="{StaticResource SectionCaptionTextStyle}" Text="Menu-loop video behavior" />
+                                        </Grid>
+
+                                        <Grid x:Name="MoviesRowOne" Style="{StaticResource SettingRowGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="220" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <CheckBox x:Name="ReduceMenuMovieStutterToggle" Click="AnySettingChanged" Content="Reduce menu movie stutter (Experimental)" HorizontalAlignment="Right" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Experimental. Forces the known menu-loop Bink movies off their internal wait path so they are less likely to hitch rendering. It does not skip or disable cutscenes." />
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                                </Grid>
+                            </Grid>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

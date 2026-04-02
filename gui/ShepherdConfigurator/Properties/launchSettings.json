@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "ShepherdConfigurator (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "ShepherdConfigurator (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+LIBRARY version
+
+EXPORTS
+    GetFileVersionInfoA=_GetFileVersionInfoA@16
+    GetFileVersionInfoExA=_GetFileVersionInfoExA@20
+    GetFileVersionInfoExW=_GetFileVersionInfoExW@20
+    GetFileVersionInfoSizeA=_GetFileVersionInfoSizeA@8
+    GetFileVersionInfoSizeExA=_GetFileVersionInfoSizeExA@12
+    GetFileVersionInfoSizeExW=_GetFileVersionInfoSizeExW@12
+    GetFileVersionInfoSizeW=_GetFileVersionInfoSizeW@8
+    GetFileVersionInfoW=_GetFileVersionInfoW@16
+    VerQueryValueA=_VerQueryValueA@16
+    VerQueryValueW=_VerQueryValueW@16
