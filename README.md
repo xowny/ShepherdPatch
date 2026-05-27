@@ -7,6 +7,8 @@ ShepherdPatch is a modernization and compatibility patch for the PC version of S
 
 It focuses on improving how the game behaves on modern Windows systems while preserving the original game experience.
 
+![image alt](https://github.com/xowny/ShepherdPatch/blob/main/JZv9u4i.png)
+
 Nexus Mods: https://www.nexusmods.com/silenthillhomecoming/mods/10
 
 ## Features
