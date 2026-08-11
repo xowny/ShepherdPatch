@@ -8,17 +8,17 @@ public sealed class IniFileStoreTests : IDisposable
         Path.GetTempPath(), $"ShepherdConfiguratorTests-{Guid.NewGuid():N}");
 
     [Fact]
-    public void TryLoadReturnsFalseForMissingFile()
+    public void LoadReportsMissingFile()
     {
-        bool loaded = IniFileStore.TryLoad(
+        IniFileLoadStatus status = IniFileStore.Load(
             Path.Combine(_directory, "missing.ini"), out IniDocument document);
 
-        Assert.False(loaded);
+        Assert.Equal(IniFileLoadStatus.Missing, status);
         Assert.Equal(string.Empty, document.Serialize());
     }
 
     [Fact]
-    public void TryLoadReturnsFalseForLockedFile()
+    public void LoadReportsLockedFileAsUnreadable()
     {
         Directory.CreateDirectory(_directory);
         string path = Path.Combine(_directory, "ShepherdPatch.ini");
@@ -26,9 +26,9 @@ public sealed class IniFileStoreTests : IDisposable
 
         using FileStream lockStream = new(
             path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-        bool loaded = IniFileStore.TryLoad(path, out IniDocument document);
+        IniFileLoadStatus status = IniFileStore.Load(path, out IniDocument document);
 
-        Assert.False(loaded);
+        Assert.Equal(IniFileLoadStatus.Unreadable, status);
         Assert.Equal(string.Empty, document.Serialize());
     }
 

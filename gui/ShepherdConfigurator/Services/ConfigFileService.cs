@@ -143,9 +143,9 @@ public static class ConfigFileService
         return ModDependencyAnalyzer.IsGameBinDirectory(path);
     }
 
-    public static bool TryLoad(string path, out IniDocument document)
+    public static IniFileLoadStatus Load(string path, out IniDocument document)
     {
-        return IniFileStore.TryLoad(path, out document);
+        return IniFileStore.Load(path, out document);
     }
 
     public static IniDocument LoadDefaults()

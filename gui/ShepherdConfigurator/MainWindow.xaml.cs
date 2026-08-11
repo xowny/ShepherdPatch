@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -29,6 +30,7 @@ public sealed partial class MainWindow : Window
     private bool _isDirty;
     private bool _showAdvancedOptions;
     private bool _isSelectingGameBin;
+    private bool _hasAppliedActivatedLayout;
     private string? _configPath;
     private IniDocument? _loadedDocument;
     private DependencyStatus? _dependencyStatus;
@@ -54,6 +56,7 @@ public sealed partial class MainWindow : Window
         ApplyWindowIcon();
         ApplyTitleBarTheme();
         SizeChanged += MainWindow_SizeChanged;
+        Activated += MainWindow_Activated;
 
         _cards =
         [
@@ -108,10 +111,7 @@ public sealed partial class MainWindow : Window
         RefreshDependencyBanner();
         ApplyAdvancedOptionsVisibility();
         UpdateCardVisibility();
-        double rasterScale = Content.XamlRoot?.RasterizationScale ?? 1.0;
-        double effectiveWidth = AdaptiveLayoutAdvisor.GetEffectiveWidth(
-            AppWindow.Size.Width, rasterScale);
-        ApplyAdaptiveLayout(AdaptiveLayoutAdvisor.GetMode(effectiveWidth));
+        ApplyAdaptiveLayout(AdaptiveLayoutMode.Standard);
     }
 
     private void LoadConfiguration()
@@ -126,7 +126,9 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (!File.Exists(_configPath))
+        IniFileLoadStatus loadStatus = ConfigFileService.Load(
+            _configPath, out IniDocument loadedDocument);
+        if (loadStatus == IniFileLoadStatus.Missing)
         {
             _loadedDocument = ConfigFileService.LoadDefaults();
             ApplyDocumentToControls(_loadedDocument);
@@ -135,7 +137,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (!ConfigFileService.TryLoad(_configPath, out IniDocument loadedDocument))
+        if (loadStatus == IniFileLoadStatus.Unreadable)
         {
             _loadedDocument = ConfigFileService.LoadDefaults();
             ApplyDocumentToControls(_loadedDocument);
@@ -431,7 +433,7 @@ public sealed partial class MainWindow : Window
             LoadConfiguration();
             RefreshDependencyBanner();
         }
-        catch (Exception)
+        catch (Exception exception) when (exception is COMException or IOException or UnauthorizedAccessException)
         {
             ConfigPathText.Text = "The game Bin picker could not be opened. Try again.";
         }
@@ -728,6 +730,20 @@ public sealed partial class MainWindow : Window
 
         ApplyFooterLayout(compact);
         ApplyCardGridLayout(mode);
+    }
+
+    private void MainWindow_Activated(object sender, WindowActivatedEventArgs args)
+    {
+        if (_hasAppliedActivatedLayout || Content.XamlRoot is null)
+        {
+            return;
+        }
+
+        double effectiveWidth = AdaptiveLayoutAdvisor.GetEffectiveWidth(
+            AppWindow.Size.Width, Content.XamlRoot.RasterizationScale);
+        ApplyAdaptiveLayout(AdaptiveLayoutAdvisor.GetMode(effectiveWidth));
+        _hasAppliedActivatedLayout = true;
+        Activated -= MainWindow_Activated;
     }
 
     private void ApplyFooterLayout(bool compact)
