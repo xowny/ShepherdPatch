@@ -2014,6 +2014,7 @@ void Log(std::string_view message)
     if (g_logStream.is_open())
     {
         g_logStream << prefix << message << "\r\n";
+        g_logStream.flush();
     }
 }
 

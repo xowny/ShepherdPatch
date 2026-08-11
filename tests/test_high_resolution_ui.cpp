@@ -43,6 +43,22 @@ TEST_CASE(HighResolutionUiKeepsPanelAndItemTiersTogether)
     CHECK_TRUE(NearlyEqual(values.itemScale, 0.0007212500116415322));
 }
 
+TEST_CASE(HighResolutionUiPreservesCommonIntermediateResolutionItemScale)
+{
+    const auto values = shh::ResolveHighResolutionUiConstants(1600, 900);
+    CHECK_TRUE(NearlyEqual(values.panelOffsetX, 770.0));
+    CHECK_TRUE(NearlyEqual(values.panelExtentX, 1330.0));
+    CHECK_TRUE(NearlyEqual(values.itemScale, 0.0006412500116415322));
+}
+
+TEST_CASE(HighResolutionUiPreservesTallIntermediateResolutionItemScale)
+{
+    const auto values = shh::ResolveHighResolutionUiConstants(1440, 1024);
+    CHECK_TRUE(NearlyEqual(values.panelOffsetX, 770.0));
+    CHECK_TRUE(NearlyEqual(values.panelExtentX, 1330.0));
+    CHECK_TRUE(NearlyEqual(values.itemScale, 0.0007212500116415322));
+}
+
 TEST_CASE(HighResolutionUiFallsBackToLargestGroupAboveFourK)
 {
     const auto values = shh::ResolveHighResolutionUiConstants(5120, 2880);
