@@ -445,7 +445,16 @@ public sealed partial class MainWindow : Window
         }
 
         IniDocument document = BuildDocumentFromControls();
-        ConfigFileService.Save(_configPath, document);
+        try
+        {
+            ConfigFileService.Save(_configPath, document);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            ConfigPathText.Text = "ShepherdPatch.ini could not be saved. Check that the file is writable and try again.";
+            return false;
+        }
+
         _loadedDocument = document;
         SetDirty(false);
         RefreshDependencyBanner();
