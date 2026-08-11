@@ -118,6 +118,11 @@ Config ParseConfig(std::string_view text)
             config.enableUltrawideFovFix =
                 ParseBoolValue(value, config.enableUltrawideFovFix);
         }
+        else if (key == "EnableHighResolutionUiFix")
+        {
+            config.enableHighResolutionUiFix =
+                ParseBoolValue(value, config.enableHighResolutionUiFix);
+        }
         else if (key == "ForceBorderless")
         {
             config.forceBorderless = ParseBoolValue(value, config.forceBorderless);

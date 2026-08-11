@@ -56,22 +56,31 @@ TEST_CASE(BuildLegacyWaitableTimerWorkerPlanLeavesOrdinarySleepsAlone)
     CHECK_EQ(plan.adjustedSleepMs, 1u);
 }
 
-TEST_CASE(BuildLegacyWaitableTimerWorkerPlanUsesTrackedTimerForLegacyWorkerPoll)
+TEST_CASE(BuildLegacyWaitableTimerWorkerPlanDoesNotConsumeTrackedTimerSignal)
 {
     const shh::LegacyWaitableTimerWorkerPlan plan =
         shh::BuildLegacyWaitableTimerWorkerPlan(true, 1, true, true);
 
-    CHECK_TRUE(plan.useTrackedTimer);
+    CHECK_TRUE(!plan.useTrackedTimer);
     CHECK_EQ(plan.adjustedSleepMs, 1u);
 }
 
-TEST_CASE(BuildLegacyWaitableTimerWorkerPlanFallsBackToYieldWithoutTrackedTimer)
+TEST_CASE(BuildLegacyWaitableTimerWorkerPlanKeepsOriginalSleepWithoutTrackedTimer)
 {
     const shh::LegacyWaitableTimerWorkerPlan plan =
         shh::BuildLegacyWaitableTimerWorkerPlan(true, 1, true, false);
 
     CHECK_TRUE(!plan.useTrackedTimer);
-    CHECK_EQ(plan.adjustedSleepMs, 0u);
+    CHECK_EQ(plan.adjustedSleepMs, 1u);
+}
+
+TEST_CASE(BuildLegacyWaitableTimerWorkerPlanPreservesNonTrivialRequestedSleep)
+{
+    const shh::LegacyWaitableTimerWorkerPlan plan =
+        shh::BuildLegacyWaitableTimerWorkerPlan(true, 25, true, true);
+
+    CHECK_TRUE(!plan.useTrackedTimer);
+    CHECK_EQ(plan.adjustedSleepMs, 25u);
 }
 
 TEST_CASE(BuildLegacyThreadControlPlanLeavesOrdinaryCallsAlone)

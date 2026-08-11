@@ -40,21 +40,15 @@ LegacyPeriodicTimerPlan BuildLegacyPeriodicTimerPlan(bool frameRateUnlockEnabled
 }
 
 LegacyWaitableTimerWorkerPlan BuildLegacyWaitableTimerWorkerPlan(
-    bool reduceLegacyWaitableTimerPolling, std::uint32_t requestedDelayMs,
-    bool isLegacyWaitableTimerWorkerCaller, bool hasTrackedTimer)
+    bool /*reduceLegacyWaitableTimerPolling*/, std::uint32_t requestedDelayMs,
+    bool /*isLegacyWaitableTimerWorkerCaller*/, bool /*hasTrackedTimer*/)
 {
-    if (!reduceLegacyWaitableTimerPolling || !isLegacyWaitableTimerWorkerCaller ||
-        requestedDelayMs != 1)
-    {
-        return LegacyWaitableTimerWorkerPlan{
-            .useTrackedTimer = false,
-            .adjustedSleepMs = requestedDelayMs,
-        };
-    }
-
+    // The original worker checks this auto-reset timer after Sleep(1). Waiting on
+    // the same handle here consumes its signal before the original check and can
+    // deadlock startup while the main thread waits for audio initialization.
     return LegacyWaitableTimerWorkerPlan{
-        .useTrackedTimer = hasTrackedTimer,
-        .adjustedSleepMs = hasTrackedTimer ? requestedDelayMs : 0u,
+        .useTrackedTimer = false,
+        .adjustedSleepMs = requestedDelayMs,
     };
 }
 

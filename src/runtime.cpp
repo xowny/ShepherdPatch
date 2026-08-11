@@ -10,6 +10,7 @@
 #include "execution_policy.h"
 #include "frame_rate_override.h"
 #include "gameplay_delta.h"
+#include "high_resolution_ui.h"
 #include "intro_skip.h"
 #include "legacy_runtime_policy.h"
 #include "lost_device_policy.h"
@@ -37,6 +38,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -147,9 +149,6 @@ constexpr std::size_t kResetExVtableIndex = 132;
 constexpr std::size_t kSetTransformVtableIndex = 44;
 constexpr std::size_t kSetViewportVtableIndex = 47;
 constexpr std::size_t kSwapChainPresentVtableIndex = 3;
-constexpr std::size_t kPresentDetourLength = 8;
-constexpr std::size_t kSwapChainPresentDetourLength = 8;
-constexpr std::size_t kEndSceneDetourLength = 7;
 constexpr std::size_t kDirectInputCreateDeviceVtableIndex = 3;
 constexpr std::size_t kDirectInputGetDeviceStateVtableIndex = 9;
 constexpr std::size_t kDirectInputSetCooperativeLevelVtableIndex = 13;
@@ -168,6 +167,24 @@ constexpr std::uintptr_t kLegacyThreadWrapperSuspendReturnRva = 0x0080B7FD;
 constexpr std::uintptr_t kSchedulerLoopUpdateRva = 0x04ED490;
 constexpr std::uintptr_t kSchedulerLoopSleepCallerRva = 0x04EB528;
 constexpr std::uintptr_t kGameplayUpdateRva = 0x01264F0;
+constexpr std::uintptr_t kStockMainFrameIntervalMsRva = 0x0108E804;
+constexpr std::uintptr_t kUiDimensionsFunctionRva = 0x00B72D20;
+constexpr std::uintptr_t kUiBaseCanvasCallRva = 0x00140816;
+constexpr std::uintptr_t kUiDimensionsWidthOperand1Rva = 0x00B72D21;
+constexpr std::uintptr_t kUiDimensionsWidthOperand2Rva = 0x00B72D27;
+constexpr std::uintptr_t kUiDimensionsHeightOperand1Rva = 0x00B72D40;
+constexpr std::uintptr_t kUiDimensionsHeightOperand2Rva = 0x00B72D48;
+constexpr std::uintptr_t kUiActualWidthRva = 0x011DE348;
+constexpr std::uintptr_t kUiActualHeightRva = 0x011DE34C;
+constexpr std::uintptr_t kUiStockWidthRva = 0x011DE350;
+constexpr std::uintptr_t kUiStockHeightRva = 0x011DE354;
+constexpr std::uintptr_t kUiStockDimensionsFunctionRva = 0x000644D9;
+constexpr std::uintptr_t kUiPanelScaleInstructionRva = 0x002A497C;
+constexpr std::uintptr_t kUiPanelOffsetInstructionRva = 0x002A498B;
+constexpr std::uintptr_t kUiPanelExtentInstructionRva = 0x002A49B4;
+constexpr std::uintptr_t kUiItemScaleInstructionRva = 0x0050D299;
+constexpr std::size_t kAbsoluteFloatOperandOffset = 2;
+constexpr std::size_t kAbsoluteDoubleOperandOffset = 4;
 constexpr std::uintptr_t kShvMainLoopRva = 0x000CAFA0;
 constexpr std::uintptr_t kLegacyPeriodicTimerCallbackRva = 0x000159DD;
 constexpr std::uintptr_t kLegacyGraphicsRetrySleepReturnRva = 0x00B8CF2E;
@@ -203,6 +220,8 @@ HMODULE g_module = nullptr;
 Config g_config{};
 std::filesystem::path g_moduleDirectory;
 std::mutex g_hookMutex;
+std::mutex g_logMutex;
+std::ofstream g_logStream;
 
 struct CadenceTracker
 {
@@ -290,6 +309,10 @@ std::once_flag g_executionPolicyApiOnce;
 std::once_flag g_renderThreadExecutionPolicyOnce;
 std::atomic<std::uint32_t> g_backBufferWidth(0);
 std::atomic<std::uint32_t> g_backBufferHeight(0);
+float g_uiPanelScale = 0.75f;
+float g_uiPanelOffsetX = 670.0f;
+float g_uiPanelExtentX = 940.0f;
+alignas(8) double g_uiItemScale = 0.0007812500116415322;
 std::once_flag g_viewportClampLogOnce;
 HighPrecisionTimerState g_highPrecisionTimerState{};
 TimePeriodFn g_timeBeginPeriod = nullptr;
@@ -407,9 +430,9 @@ std::uintptr_t g_lastOriginalEndSceneAddress = 0;
 std::uintptr_t g_lastPresentCodeGatewayAddress = 0;
 std::uintptr_t g_lastSwapChainPresentCodeGatewayAddress = 0;
 std::uintptr_t g_lastEndSceneCodeGatewayAddress = 0;
-thread_local std::uint32_t g_d3dProbeCreateDepth = 0;
 
 void Log(std::string_view message);
+void InitializeLog();
 std::string FormatAddress(std::uintptr_t address);
 bool PatchPointer(void** target, void* replacement);
 bool PatchVtableEntry(void* object, std::size_t index, void* replacement, void** original);
@@ -487,8 +510,6 @@ std::uintptr_t ReadVtableEntryAddress(void* object, std::size_t index);
 bool TryPatchVtableEntrySafe(void* object, std::size_t index, void* replacement, void** original);
 bool HasExecutableVtableEntries(void* object,
                                 std::initializer_list<std::size_t> requiredIndices);
-bool StartsWithRelativeJumpDetour(std::uintptr_t address);
-bool InstallGlobalD3DCodeHooks();
 bool InstallBinkMovieHooks(HMODULE module, const char* moduleLabel);
 bool InstallDeviceExHooks(IDirect3DDevice9* device);
 void EnsureRenderHooksStillInstalled();
@@ -951,7 +972,6 @@ void EnsureRenderHooksStillInstalled()
 
     InstallSwapChainPresentHook(device);
     InstallDeviceExHooks(device);
-    InstallGlobalD3DCodeHooks();
 
     if (repairedAnyHook)
     {
@@ -1002,87 +1022,6 @@ void InstallSwapChainPresentHook(IDirect3DDevice9* device)
                 << ", original=" << FormatAddress(g_lastOriginalSwapChainPresentAddress);
         Log(message.str());
     }
-}
-
-bool InstallGlobalD3DCodeHooks()
-{
-    bool installedAnyHook = false;
-
-    const auto installHook = [&](const char* label, std::size_t overwriteLength,
-                                 std::uintptr_t replacementAddress,
-                                 RenderHookTargets targets, void** codeGateway,
-                                 std::uintptr_t* gatewayAddress) {
-        const bool targetStartsWithRelativeJump =
-            StartsWithRelativeJumpDetour(targets.vtableOriginal);
-        if (!ShouldInstallRenderCodeDetour(targets, replacementAddress,
-                                           targetStartsWithRelativeJump))
-        {
-            if (targetStartsWithRelativeJump && targets.codeGateway == 0)
-            {
-                std::ostringstream message;
-                message << label << " code detour skipped because the original target already "
-                        << "starts with a relative jump at "
-                        << FormatAddress(targets.vtableOriginal);
-                Log(message.str());
-            }
-            return;
-        }
-
-        void* gateway = nullptr;
-        if (!InstallRelativeJumpDetour(reinterpret_cast<void*>(targets.vtableOriginal),
-                                       overwriteLength,
-                                       reinterpret_cast<void*>(replacementAddress), &gateway))
-        {
-            std::ostringstream message;
-            message << "Failed to install " << label << " code detour at "
-                    << FormatAddress(targets.vtableOriginal);
-            Log(message.str());
-            return;
-        }
-
-        *codeGateway = gateway;
-        *gatewayAddress = reinterpret_cast<std::uintptr_t>(gateway);
-        installedAnyHook = true;
-
-        std::ostringstream message;
-        message << label << " code detour installed: target="
-                << FormatAddress(targets.vtableOriginal)
-                << ", gateway=" << FormatAddress(*gatewayAddress);
-        Log(message.str());
-    };
-
-    installHook("IDirect3DDevice9::Present", kPresentDetourLength,
-                reinterpret_cast<std::uintptr_t>(&HookedPresent),
-                RenderHookTargets{
-                    .vtableOriginal = reinterpret_cast<std::uintptr_t>(g_originalPresent),
-                    .codeGateway =
-                        reinterpret_cast<std::uintptr_t>(g_originalPresentCodeGateway),
-                },
-                reinterpret_cast<void**>(&g_originalPresentCodeGateway),
-                &g_lastPresentCodeGatewayAddress);
-
-    installHook("IDirect3DSwapChain9::Present", kSwapChainPresentDetourLength,
-                reinterpret_cast<std::uintptr_t>(&HookedSwapChainPresent),
-                RenderHookTargets{
-                    .vtableOriginal =
-                        reinterpret_cast<std::uintptr_t>(g_originalSwapChainPresent),
-                    .codeGateway = reinterpret_cast<std::uintptr_t>(
-                        g_originalSwapChainPresentCodeGateway),
-                },
-                reinterpret_cast<void**>(&g_originalSwapChainPresentCodeGateway),
-                &g_lastSwapChainPresentCodeGatewayAddress);
-
-    installHook("IDirect3DDevice9::EndScene", kEndSceneDetourLength,
-                reinterpret_cast<std::uintptr_t>(&HookedEndScene),
-                RenderHookTargets{
-                    .vtableOriginal = reinterpret_cast<std::uintptr_t>(g_originalEndScene),
-                    .codeGateway =
-                        reinterpret_cast<std::uintptr_t>(g_originalEndSceneCodeGateway),
-                },
-                reinterpret_cast<void**>(&g_originalEndSceneCodeGateway),
-                &g_lastEndSceneCodeGatewayAddress);
-
-    return installedAnyHook;
 }
 
 bool InstallDeviceExHooks(IDirect3DDevice9* device)
@@ -1212,6 +1151,13 @@ void UpdateBackbufferDimensions(const PresentParams& params)
 {
     g_backBufferWidth.store(params.backBufferWidth);
     g_backBufferHeight.store(params.backBufferHeight);
+
+    const auto uiConstants = ResolveHighResolutionUiConstants(
+        params.backBufferWidth, params.backBufferHeight);
+    g_uiPanelScale = uiConstants.panelScale;
+    g_uiPanelOffsetX = uiConstants.panelOffsetX;
+    g_uiPanelExtentX = uiConstants.panelExtentX;
+    g_uiItemScale = uiConstants.itemScale;
 }
 
 bool InitializeHighPrecisionTimingState()
@@ -2049,7 +1995,43 @@ bool TargetsCurrentThread(HANDLE threadHandle)
 
 void Log(std::string_view message)
 {
-    (void)message;
+    if (g_moduleDirectory.empty())
+    {
+        return;
+    }
+
+    SYSTEMTIME now = {};
+    GetLocalTime(&now);
+
+    char prefix[96] = {};
+    std::snprintf(prefix, sizeof(prefix),
+                  "%04u-%02u-%02u %02u:%02u:%02u.%03u [thread %lu] ",
+                  now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute,
+                  now.wSecond, now.wMilliseconds,
+                  static_cast<unsigned long>(GetCurrentThreadId()));
+
+    std::scoped_lock lock(g_logMutex);
+    if (g_logStream.is_open())
+    {
+        g_logStream << prefix << message << "\r\n";
+        g_logStream.flush();
+    }
+}
+
+void InitializeLog()
+{
+    if (g_moduleDirectory.empty())
+    {
+        return;
+    }
+
+    {
+        std::scoped_lock lock(g_logMutex);
+        g_logStream.open(g_moduleDirectory / "ShepherdPatch.log",
+                         std::ios::binary | std::ios::trunc);
+    }
+
+    Log("ShepherdPatch runtime initialization started.");
 }
 
 Config LoadConfigFromDisk()
@@ -2209,6 +2191,52 @@ void LogEngineConfigSnapshot()
     Log(message.str());
 }
 
+void LogPatchConfigSnapshot()
+{
+    std::ostringstream message;
+    message << "Patch config: frameRateUnlock=" << g_config.enableFrameRateUnlock
+            << ", targetFrameRate=" << g_config.targetFrameRate
+            << ", disableVsync=" << g_config.disableVsync
+            << ", preciseSleep=" << g_config.enablePreciseSleepShim
+            << ", borderless=" << g_config.forceBorderless
+            << ", rawMouse=" << g_config.enableRawMouseInput
+            << ", highResolutionUi=" << g_config.enableHighResolutionUiFix;
+    Log(message.str());
+}
+
+void LogModuleIdentity(HMODULE module, std::string_view label)
+{
+    if (module == nullptr ||
+        !IsReadableMemoryRange(module, sizeof(IMAGE_DOS_HEADER)))
+    {
+        Log(std::string(label) + " identity unavailable.");
+        return;
+    }
+
+    const auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+    const auto* ntHeaders = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+        reinterpret_cast<const std::uint8_t*>(module) + dosHeader->e_lfanew);
+    if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE ||
+        !IsReadableMemoryRange(ntHeaders, sizeof(*ntHeaders)) ||
+        ntHeaders->Signature != IMAGE_NT_SIGNATURE)
+    {
+        Log(std::string(label) + " has invalid PE headers.");
+        return;
+    }
+
+    wchar_t modulePath[MAX_PATH] = {};
+    GetModuleFileNameW(module, modulePath, MAX_PATH);
+
+    std::ostringstream message;
+    message << label << " identity: base="
+            << FormatAddress(reinterpret_cast<std::uintptr_t>(module))
+            << ", imageSize=0x" << std::hex
+            << ntHeaders->OptionalHeader.SizeOfImage
+            << ", timestamp=0x" << ntHeaders->FileHeader.TimeDateStamp
+            << ", path=" << std::filesystem::path(modulePath).string();
+    Log(message.str());
+}
+
 void LogShvConfigSnapshot()
 {
     const std::filesystem::path shvConfig = g_moduleDirectory / "shv.cfg";
@@ -2364,31 +2392,6 @@ void ApplyBorderlessWindow(HWND window)
     Log(message.str());
 }
 
-class ScopedD3DProbeCreate
-{
-public:
-    ScopedD3DProbeCreate()
-    {
-        ++g_d3dProbeCreateDepth;
-    }
-
-    ~ScopedD3DProbeCreate()
-    {
-        if (g_d3dProbeCreateDepth > 0)
-        {
-            --g_d3dProbeCreateDepth;
-        }
-    }
-
-    ScopedD3DProbeCreate(const ScopedD3DProbeCreate&) = delete;
-    ScopedD3DProbeCreate& operator=(const ScopedD3DProbeCreate&) = delete;
-};
-
-bool IsD3DProbeCreateActive()
-{
-    return g_d3dProbeCreateDepth != 0;
-}
-
 bool IsOrdinalProcName(LPCSTR procName)
 {
     return reinterpret_cast<std::uintptr_t>(procName) <= 0xffffu;
@@ -2447,10 +2450,46 @@ bool PatchVtableEntry(void* object, std::size_t index, void* replacement, void**
     return PatchPointer(&vtable[index], replacement);
 }
 
-bool StartsWithRelativeJumpDetour(std::uintptr_t address)
+std::string FormatByteSequence(const std::uint8_t* bytes, std::size_t size)
 {
-    std::uint8_t opcode = 0;
-    return TryReadByteValue(reinterpret_cast<const void*>(address), opcode) && opcode == 0xE9;
+    std::ostringstream stream;
+    stream << std::hex;
+    for (std::size_t index = 0; index < size; ++index)
+    {
+        if (index != 0)
+        {
+            stream << ' ';
+        }
+        stream.width(2);
+        stream.fill('0');
+        stream << static_cast<unsigned int>(bytes[index]);
+    }
+    return stream.str();
+}
+
+bool MatchesCodeSignature(const void* address,
+                          std::initializer_list<std::uint8_t> expected,
+                          std::string_view label)
+{
+    if (!IsReadableMemoryRange(address, expected.size()))
+    {
+        Log(std::string(label) + " hook skipped: target memory is not readable.");
+        return false;
+    }
+
+    const auto* actual = static_cast<const std::uint8_t*>(address);
+    if (std::memcmp(actual, expected.begin(), expected.size()) == 0)
+    {
+        return true;
+    }
+
+    std::ostringstream message;
+    message << label << " hook skipped: code signature mismatch at "
+            << FormatAddress(reinterpret_cast<std::uintptr_t>(address))
+            << ", expected=" << FormatByteSequence(expected.begin(), expected.size())
+            << ", actual=" << FormatByteSequence(actual, expected.size());
+    Log(message.str());
+    return false;
 }
 
 bool InstallRelativeJumpDetour(void* target, std::size_t overwriteLength, void* replacement,
@@ -2464,7 +2503,10 @@ bool InstallRelativeJumpDetour(void* target, std::size_t overwriteLength, void* 
     auto* targetBytes = static_cast<std::uint8_t*>(target);
     if (targetBytes[0] == 0xE9)
     {
-        return true;
+        std::int32_t displacement = 0;
+        std::memcpy(&displacement, targetBytes + 1, sizeof(displacement));
+        const auto destination = targetBytes + kRelativeJumpLength + displacement;
+        return destination == replacement;
     }
 
     auto* gateway = static_cast<std::uint8_t*>(VirtualAlloc(
@@ -2943,14 +2985,16 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
     }
 
     D3DPRESENT_PARAMETERS workingParams = {};
+    D3DPRESENT_PARAMETERS retryParams = {};
     D3DPRESENT_PARAMETERS* paramsForCall = presentationParameters;
-    const bool isProbeCreate = IsD3DProbeCreateActive();
     const auto caller = reinterpret_cast<std::uintptr_t>(_ReturnAddress());
     if (presentationParameters != nullptr && g_config.enableSafeResolutionChanges)
     {
         workingParams = *presentationParameters;
         const HWND targetWindow =
-            workingParams.hDeviceWindow != nullptr ? workingParams.hDeviceWindow : focusWindow;
+            paramsForCall != nullptr && paramsForCall->hDeviceWindow != nullptr
+                ? paramsForCall->hDeviceWindow
+                : focusWindow;
         FillMissingBorderlessDimensions(targetWindow, workingParams);
         const PresentParams original = ToPresentParams(workingParams);
         const PresentParams sanitized = SanitizeForReset(original, g_config);
@@ -2958,8 +3002,7 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
         paramsForCall = &workingParams;
 
         std::ostringstream message;
-        message << (isProbeCreate ? "Probe CreateDevice intercepted: "
-                                  : "CreateDevice intercepted: ")
+        message << "CreateDevice intercepted: "
                 << sanitized.backBufferWidth << 'x'
                 << sanitized.backBufferHeight << ", windowed=" << sanitized.windowed
                 << ", refresh=" << original.refreshRate << "->" << sanitized.refreshRate
@@ -2978,7 +3021,10 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
     if (FAILED(hr) && presentationParameters != nullptr && g_config.enableSafeResolutionChanges &&
         g_config.retryResetInWindowedMode)
     {
-        D3DPRESENT_PARAMETERS retryParams = *presentationParameters;
+        retryParams = *presentationParameters;
+        const HWND retryTargetWindow =
+            retryParams.hDeviceWindow != nullptr ? retryParams.hDeviceWindow : focusWindow;
+        FillMissingBorderlessDimensions(retryTargetWindow, retryParams);
         const PresentParams retry =
             BuildRetryResetParams(ToPresentParams(retryParams), g_config);
         ApplyPresentParams(retry, retryParams);
@@ -2986,19 +3032,22 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
         hr = g_originalCreateDevice(direct3d, adapter, deviceType, focusWindow, behaviorFlags,
                                     &retryParams, returnedDevice);
         Log("CreateDevice retry attempted, result=" + FormatHr(hr));
+        if (SUCCEEDED(hr))
+        {
+            paramsForCall = &retryParams;
+        }
     }
 
     if (SUCCEEDED(hr) && returnedDevice != nullptr && *returnedDevice != nullptr)
     {
-        if (!isProbeCreate)
+        if (paramsForCall != nullptr)
         {
-            UpdateBackbufferDimensions(ToPresentParams(workingParams));
-            g_lastDeviceAddress = reinterpret_cast<std::uintptr_t>(*returnedDevice);
+            UpdateBackbufferDimensions(ToPresentParams(*paramsForCall));
         }
+        g_lastDeviceAddress = reinterpret_cast<std::uintptr_t>(*returnedDevice);
         {
             std::ostringstream message;
-            message << (isProbeCreate ? "Probe D3D swap chain count="
-                                      : "D3D swap chain count=")
+            message << "D3D swap chain count="
                     << (*returnedDevice)->GetNumberOfSwapChains();
             Log(message.str());
         }
@@ -3053,15 +3102,13 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
             Log("IDirect3DDevice9::SetViewport hook installed.");
         }
         InstallDeviceExHooks(*returnedDevice);
-        InstallGlobalD3DCodeHooks();
 
-        if (!isProbeCreate)
-        {
-            const HWND targetWindow =
-                workingParams.hDeviceWindow != nullptr ? workingParams.hDeviceWindow : focusWindow;
-            EnsureGameWindowHook(targetWindow);
-            ApplyBorderlessWindow(targetWindow);
-        }
+        const HWND targetWindow =
+            paramsForCall != nullptr && paramsForCall->hDeviceWindow != nullptr
+                ? paramsForCall->hDeviceWindow
+                : focusWindow;
+        EnsureGameWindowHook(targetWindow);
+        ApplyBorderlessWindow(targetWindow);
     }
 
     return hr;
@@ -3080,8 +3127,8 @@ HRESULT STDMETHODCALLTYPE HookedCreateDeviceEx(IDirect3D9Ex* direct3d, UINT adap
     }
 
     D3DPRESENT_PARAMETERS workingParams = {};
+    D3DPRESENT_PARAMETERS retryParams = {};
     D3DPRESENT_PARAMETERS* paramsForCall = presentationParameters;
-    const bool isProbeCreate = IsD3DProbeCreateActive();
     const auto caller = reinterpret_cast<std::uintptr_t>(_ReturnAddress());
     if (presentationParameters != nullptr && g_config.enableSafeResolutionChanges)
     {
@@ -3095,8 +3142,7 @@ HRESULT STDMETHODCALLTYPE HookedCreateDeviceEx(IDirect3D9Ex* direct3d, UINT adap
         paramsForCall = &workingParams;
 
         std::ostringstream message;
-        message << (isProbeCreate ? "Probe CreateDeviceEx intercepted: "
-                                  : "CreateDeviceEx intercepted: ")
+        message << "CreateDeviceEx intercepted: "
                 << sanitized.backBufferWidth << 'x'
                 << sanitized.backBufferHeight << ", windowed=" << sanitized.windowed
                 << ", refresh=" << original.refreshRate << "->" << sanitized.refreshRate
@@ -3116,7 +3162,10 @@ HRESULT STDMETHODCALLTYPE HookedCreateDeviceEx(IDirect3D9Ex* direct3d, UINT adap
     if (FAILED(hr) && presentationParameters != nullptr && g_config.enableSafeResolutionChanges &&
         g_config.retryResetInWindowedMode)
     {
-        D3DPRESENT_PARAMETERS retryParams = *presentationParameters;
+        retryParams = *presentationParameters;
+        const HWND retryTargetWindow =
+            retryParams.hDeviceWindow != nullptr ? retryParams.hDeviceWindow : focusWindow;
+        FillMissingBorderlessDimensions(retryTargetWindow, retryParams);
         const PresentParams retry =
             BuildRetryResetParams(ToPresentParams(retryParams), g_config, true);
         ApplyPresentParams(retry, retryParams);
@@ -3124,19 +3173,22 @@ HRESULT STDMETHODCALLTYPE HookedCreateDeviceEx(IDirect3D9Ex* direct3d, UINT adap
         hr = g_originalCreateDeviceEx(direct3d, adapter, deviceType, focusWindow, behaviorFlags,
                                       &retryParams, nullptr, returnedDevice);
         Log("CreateDeviceEx retry attempted, result=" + FormatHr(hr));
+        if (SUCCEEDED(hr))
+        {
+            paramsForCall = &retryParams;
+        }
     }
 
     if (SUCCEEDED(hr) && returnedDevice != nullptr && *returnedDevice != nullptr)
     {
-        if (!isProbeCreate)
+        if (paramsForCall != nullptr)
         {
-            UpdateBackbufferDimensions(ToPresentParams(workingParams));
-            g_lastDeviceAddress = reinterpret_cast<std::uintptr_t>(*returnedDevice);
+            UpdateBackbufferDimensions(ToPresentParams(*paramsForCall));
         }
+        g_lastDeviceAddress = reinterpret_cast<std::uintptr_t>(*returnedDevice);
         {
             std::ostringstream message;
-            message << (isProbeCreate ? "Probe D3DEx swap chain count="
-                                      : "D3DEx swap chain count=")
+            message << "D3DEx swap chain count="
                     << (*returnedDevice)->GetNumberOfSwapChains();
             Log(message.str());
         }
@@ -3191,15 +3243,13 @@ HRESULT STDMETHODCALLTYPE HookedCreateDeviceEx(IDirect3D9Ex* direct3d, UINT adap
             Log("IDirect3DDevice9::SetViewport hook installed.");
         }
         InstallDeviceExHooks(*returnedDevice);
-        InstallGlobalD3DCodeHooks();
 
-        if (!isProbeCreate)
-        {
-            const HWND targetWindow =
-                workingParams.hDeviceWindow != nullptr ? workingParams.hDeviceWindow : focusWindow;
-            EnsureGameWindowHook(targetWindow);
-            ApplyBorderlessWindow(targetWindow);
-        }
+        const HWND targetWindow =
+            paramsForCall != nullptr && paramsForCall->hDeviceWindow != nullptr
+                ? paramsForCall->hDeviceWindow
+                : focusWindow;
+        EnsureGameWindowHook(targetWindow);
+        ApplyBorderlessWindow(targetWindow);
     }
 
     return hr;
@@ -4476,7 +4526,6 @@ HRESULT STDMETHODCALLTYPE HookedReset(IDirect3DDevice9* device,
         UpdateBackbufferDimensions(ToPresentParams(workingParams));
         InstallSwapChainPresentHook(device);
         InstallDeviceExHooks(device);
-        InstallGlobalD3DCodeHooks();
         EnsureGameWindowHook(workingParams.hDeviceWindow);
         ApplyBorderlessWindow(workingParams.hDeviceWindow);
         ClearLostDeviceRecoveryWindow("reset");
@@ -4508,7 +4557,6 @@ HRESULT STDMETHODCALLTYPE HookedReset(IDirect3DDevice9* device,
         UpdateBackbufferDimensions(ToPresentParams(retryParams));
         InstallSwapChainPresentHook(device);
         InstallDeviceExHooks(device);
-        InstallGlobalD3DCodeHooks();
         EnsureGameWindowHook(retryParams.hDeviceWindow);
         ApplyBorderlessWindow(retryParams.hDeviceWindow);
         ClearLostDeviceRecoveryWindow("reset_retry");
@@ -4582,7 +4630,6 @@ HRESULT STDMETHODCALLTYPE HookedResetEx(IDirect3DDevice9Ex* device,
         UpdateBackbufferDimensions(ToPresentParams(workingParams));
         InstallSwapChainPresentHook(device);
         InstallDeviceExHooks(device);
-        InstallGlobalD3DCodeHooks();
         EnsureGameWindowHook(workingParams.hDeviceWindow);
         ApplyBorderlessWindow(workingParams.hDeviceWindow);
         ClearLostDeviceRecoveryWindow("reset_ex");
@@ -4614,7 +4661,6 @@ HRESULT STDMETHODCALLTYPE HookedResetEx(IDirect3DDevice9Ex* device,
         UpdateBackbufferDimensions(ToPresentParams(retryParams));
         InstallSwapChainPresentHook(device);
         InstallDeviceExHooks(device);
-        InstallGlobalD3DCodeHooks();
         EnsureGameWindowHook(retryParams.hDeviceWindow);
         ApplyBorderlessWindow(retryParams.hDeviceWindow);
         ClearLostDeviceRecoveryWindow("reset_ex_retry");
@@ -4934,6 +4980,259 @@ bool ResolveEngineFrameBudgetPointers(HMODULE engineModule)
     return true;
 }
 
+void __cdecl ResolveFixedUiBaseCanvas(float* width, float* height, void*)
+{
+    if (width != nullptr)
+    {
+        *width = 1280.0f;
+    }
+    if (height != nullptr)
+    {
+        *height = 720.0f;
+    }
+}
+
+bool ApplyHighResolutionUiFix(HMODULE engineModule)
+{
+    if (!g_config.enableHighResolutionUiFix || engineModule == nullptr)
+    {
+        return false;
+    }
+
+    const auto moduleBase = reinterpret_cast<std::uintptr_t>(engineModule);
+    auto* dimensionsFunction = reinterpret_cast<std::uint8_t*>(
+        moduleBase + kUiDimensionsFunctionRva);
+    auto* baseCanvasCall = reinterpret_cast<std::uint8_t*>(
+        moduleBase + kUiBaseCanvasCallRva);
+    auto* panelScaleInstruction = reinterpret_cast<std::uint8_t*>(
+        moduleBase + kUiPanelScaleInstructionRva);
+    auto* panelOffsetInstruction = reinterpret_cast<std::uint8_t*>(
+        moduleBase + kUiPanelOffsetInstructionRva);
+    auto* panelExtentInstruction = reinterpret_cast<std::uint8_t*>(
+        moduleBase + kUiPanelExtentInstructionRva);
+    auto* itemScaleInstruction = reinterpret_cast<std::uint8_t*>(
+        moduleBase + kUiItemScaleInstructionRva);
+
+    // The shared routine incorrectly reads the engine's fixed 1280x720 canvas.
+    // Most UI texture panels need the active render dimensions instead. One menu
+    // call deliberately requires the base canvas, so redirect only that call.
+    if (!MatchesCodeSignature(
+            dimensionsFunction,
+            {0xA1, 0x50, 0xE3, 0x1D, 0x11, 0xDB, 0x05, 0x50, 0xE3, 0x1D, 0x11},
+            "High-resolution UI dimensions") ||
+        !MatchesCodeSignature(
+            dimensionsFunction + 0x1E,
+            {0x8B, 0x15, 0x54, 0xE3, 0x1D, 0x11, 0x85, 0xD2, 0xDB, 0x05,
+             0x54, 0xE3, 0x1D, 0x11},
+            "High-resolution UI height") ||
+        !MatchesCodeSignature(baseCanvasCall,
+                              {0xE8, 0xBE, 0x3C, 0xF2, 0xFF},
+                              "High-resolution UI base-canvas call") ||
+        !MatchesCodeSignature(panelScaleInstruction,
+                              {0xD9, 0x05, 0x54, 0x2F, 0xF9, 0x10},
+                              "High-resolution UI panel scale") ||
+        !MatchesCodeSignature(panelOffsetInstruction,
+                              {0xD9, 0x05, 0xC0, 0x76, 0xFB, 0x10},
+                              "High-resolution UI panel offset") ||
+        !MatchesCodeSignature(panelExtentInstruction,
+                              {0xD9, 0x05, 0xBC, 0x76, 0xFB, 0x10},
+                              "High-resolution UI panel extent") ||
+        !MatchesCodeSignature(itemScaleInstruction,
+                              {0xF2, 0x0F, 0x59, 0x05, 0x48, 0x90, 0xFF, 0x10},
+                              "High-resolution UI item scale"))
+    {
+        return false;
+    }
+
+    std::int32_t originalCallDisplacement = 0;
+    std::memcpy(&originalCallDisplacement, baseCanvasCall + 1,
+                sizeof(originalCallDisplacement));
+    const auto originalCallTarget = reinterpret_cast<std::uintptr_t>(
+        baseCanvasCall + kRelativeJumpLength + originalCallDisplacement);
+    if (originalCallTarget != moduleBase + kUiStockDimensionsFunctionRva)
+    {
+        Log("High-resolution UI fix skipped: base-canvas call target was unexpected.");
+        return false;
+    }
+
+    const auto replacementAddress =
+        reinterpret_cast<std::intptr_t>(&ResolveFixedUiBaseCanvas);
+    const auto callReturnAddress = reinterpret_cast<std::intptr_t>(
+        baseCanvasCall + kRelativeJumpLength);
+    const auto replacementDelta = replacementAddress - callReturnAddress;
+    if (replacementDelta < std::numeric_limits<std::int32_t>::min() ||
+        replacementDelta > std::numeric_limits<std::int32_t>::max())
+    {
+        Log("High-resolution UI fix skipped: replacement call is out of range.");
+        return false;
+    }
+
+    const std::array<std::uintptr_t, 4> constantAddresses{
+        reinterpret_cast<std::uintptr_t>(&g_uiPanelScale),
+        reinterpret_cast<std::uintptr_t>(&g_uiPanelOffsetX),
+        reinterpret_cast<std::uintptr_t>(&g_uiPanelExtentX),
+        reinterpret_cast<std::uintptr_t>(&g_uiItemScale),
+    };
+    if (std::any_of(constantAddresses.begin(), constantAddresses.end(),
+                    [](std::uintptr_t address) {
+                        return address > std::numeric_limits<std::uint32_t>::max();
+                    }))
+    {
+        Log("High-resolution UI fix skipped: a replacement constant is out of range.");
+        return false;
+    }
+
+    constexpr std::size_t kPanelInstructionSpan =
+        (kUiPanelExtentInstructionRva + 6) - kUiPanelScaleInstructionRva;
+    DWORD functionProtection = 0;
+    DWORD callProtection = 0;
+    DWORD panelProtection = 0;
+    DWORD itemProtection = 0;
+    DWORD ignored = 0;
+
+    // Acquire every writable region before the first mutation. This prevents a
+    // failed protection change from leaving a mixture of stock and patched UI code.
+    if (VirtualProtect(dimensionsFunction, 0x2C, PAGE_EXECUTE_READWRITE,
+                       &functionProtection) == FALSE)
+    {
+        Log("High-resolution UI fix skipped: dimensions routine was not writable.");
+        return false;
+    }
+    if (VirtualProtect(baseCanvasCall, kRelativeJumpLength, PAGE_EXECUTE_READWRITE,
+                       &callProtection) == FALSE)
+    {
+        VirtualProtect(dimensionsFunction, 0x2C, functionProtection, &ignored);
+        Log("High-resolution UI fix skipped: base-canvas call was not writable.");
+        return false;
+    }
+    if (VirtualProtect(panelScaleInstruction, kPanelInstructionSpan,
+                       PAGE_EXECUTE_READWRITE, &panelProtection) == FALSE)
+    {
+        VirtualProtect(baseCanvasCall, kRelativeJumpLength, callProtection, &ignored);
+        VirtualProtect(dimensionsFunction, 0x2C, functionProtection, &ignored);
+        Log("High-resolution UI fix skipped: panel constants were not writable.");
+        return false;
+    }
+    if (VirtualProtect(itemScaleInstruction, 8, PAGE_EXECUTE_READWRITE,
+                       &itemProtection) == FALSE)
+    {
+        VirtualProtect(panelScaleInstruction, kPanelInstructionSpan,
+                       panelProtection, &ignored);
+        VirtualProtect(baseCanvasCall, kRelativeJumpLength, callProtection, &ignored);
+        VirtualProtect(dimensionsFunction, 0x2C, functionProtection, &ignored);
+        Log("High-resolution UI fix skipped: item scale was not writable.");
+        return false;
+    }
+
+    const std::uint32_t actualWidth =
+        static_cast<std::uint32_t>(moduleBase + kUiActualWidthRva);
+    const std::uint32_t actualHeight =
+        static_cast<std::uint32_t>(moduleBase + kUiActualHeightRva);
+    std::memcpy(reinterpret_cast<void*>(moduleBase + kUiDimensionsWidthOperand1Rva),
+                &actualWidth, sizeof(actualWidth));
+    std::memcpy(reinterpret_cast<void*>(moduleBase + kUiDimensionsWidthOperand2Rva),
+                &actualWidth, sizeof(actualWidth));
+    std::memcpy(reinterpret_cast<void*>(moduleBase + kUiDimensionsHeightOperand1Rva),
+                &actualHeight, sizeof(actualHeight));
+    std::memcpy(reinterpret_cast<void*>(moduleBase + kUiDimensionsHeightOperand2Rva),
+                &actualHeight, sizeof(actualHeight));
+
+    const auto replacementDisplacement = static_cast<std::int32_t>(replacementDelta);
+    std::memcpy(baseCanvasCall + 1, &replacementDisplacement,
+                sizeof(replacementDisplacement));
+
+    const auto panelScaleAddress = static_cast<std::uint32_t>(constantAddresses[0]);
+    const auto panelOffsetAddress = static_cast<std::uint32_t>(constantAddresses[1]);
+    const auto panelExtentAddress = static_cast<std::uint32_t>(constantAddresses[2]);
+    std::memcpy(panelScaleInstruction + kAbsoluteFloatOperandOffset,
+                &panelScaleAddress, sizeof(panelScaleAddress));
+    std::memcpy(panelOffsetInstruction + kAbsoluteFloatOperandOffset,
+                &panelOffsetAddress, sizeof(panelOffsetAddress));
+    std::memcpy(panelExtentInstruction + kAbsoluteFloatOperandOffset,
+                &panelExtentAddress, sizeof(panelExtentAddress));
+    const auto itemScaleAddress = static_cast<std::uint32_t>(constantAddresses[3]);
+    std::memcpy(itemScaleInstruction + kAbsoluteDoubleOperandOffset,
+                &itemScaleAddress, sizeof(itemScaleAddress));
+
+    VirtualProtect(dimensionsFunction, 0x2C, functionProtection, &ignored);
+    VirtualProtect(baseCanvasCall, kRelativeJumpLength, callProtection, &ignored);
+    VirtualProtect(panelScaleInstruction, kPanelInstructionSpan,
+                   panelProtection, &ignored);
+    VirtualProtect(itemScaleInstruction, 8, itemProtection, &ignored);
+
+    FlushInstructionCache(GetCurrentProcess(), dimensionsFunction, 0x2C);
+    FlushInstructionCache(GetCurrentProcess(), baseCanvasCall, kRelativeJumpLength);
+    FlushInstructionCache(GetCurrentProcess(), panelScaleInstruction,
+                          kPanelInstructionSpan);
+    FlushInstructionCache(GetCurrentProcess(), itemScaleInstruction, 8);
+
+    Log("High-resolution UI fix applied: active render dimensions and resolution-specific "
+        "map, document, and item constants are enabled; the fixed menu canvas remains "
+        "1280x720.");
+    return true;
+}
+
+bool ApplyStockMainFrameInterval(HMODULE engineModule)
+{
+    if (!g_config.enableFrameRateUnlock || engineModule == nullptr)
+    {
+        return false;
+    }
+
+    auto* intervalMilliseconds = reinterpret_cast<float*>(
+        reinterpret_cast<std::uintptr_t>(engineModule) + kStockMainFrameIntervalMsRva);
+    if (!IsReadableMemoryRange(intervalMilliseconds, sizeof(*intervalMilliseconds)))
+    {
+        Log("Stock main frame interval patch skipped: target memory is not readable.");
+        return false;
+    }
+
+    constexpr float kExpectedStockIntervalMilliseconds = 1000.0f / 30.0f;
+    constexpr float kStockIntervalToleranceMilliseconds = 0.1f;
+    const float originalIntervalMilliseconds = *intervalMilliseconds;
+    if (!std::isfinite(originalIntervalMilliseconds) ||
+        std::fabs(originalIntervalMilliseconds - kExpectedStockIntervalMilliseconds) >
+            kStockIntervalToleranceMilliseconds)
+    {
+        std::ostringstream message;
+        message << "Stock main frame interval patch skipped: expected a 30 FPS interval, found "
+                << originalIntervalMilliseconds << "ms at "
+                << FormatAddress(reinterpret_cast<std::uintptr_t>(intervalMilliseconds));
+        Log(message.str());
+        return false;
+    }
+
+    const std::uint32_t effectiveFrameRate = ResolveEngineFrameRate(
+        g_config.enableFrameRateUnlock, g_config.targetFrameRate, 30);
+    const float targetIntervalMilliseconds =
+        ComputeFrameDurationMilliseconds(effectiveFrameRate);
+    if (!std::isfinite(targetIntervalMilliseconds) || targetIntervalMilliseconds <= 0.0f)
+    {
+        Log("Stock main frame interval patch skipped: target interval is invalid.");
+        return false;
+    }
+
+    DWORD oldProtection = 0;
+    if (VirtualProtect(intervalMilliseconds, sizeof(*intervalMilliseconds),
+                       PAGE_READWRITE, &oldProtection) == FALSE)
+    {
+        Log("Stock main frame interval patch skipped: VirtualProtect failed.");
+        return false;
+    }
+
+    *intervalMilliseconds = targetIntervalMilliseconds;
+    DWORD ignored = 0;
+    VirtualProtect(intervalMilliseconds, sizeof(*intervalMilliseconds),
+                   oldProtection, &ignored);
+
+    std::ostringstream message;
+    message << "Stock main frame interval patched: " << originalIntervalMilliseconds
+            << "ms -> " << targetIntervalMilliseconds << "ms ("
+            << effectiveFrameRate << " FPS).";
+    Log(message.str());
+    return true;
+}
+
 bool ResolveSchedulerTimingPointers(HMODULE engineModule)
 {
     if (engineModule == nullptr)
@@ -4950,6 +5249,20 @@ bool ResolveSchedulerTimingPointers(HMODULE engineModule)
     if (!IsCommittedMemoryRange(updateDeltaSeconds, sizeof(*updateDeltaSeconds)) ||
         !IsCommittedMemoryRange(sleepMilliseconds, sizeof(*sleepMilliseconds)))
     {
+        g_schedulerUpdateDeltaSeconds = nullptr;
+        g_schedulerSleepMilliseconds = nullptr;
+        return false;
+    }
+
+    if (!std::isfinite(*updateDeltaSeconds) || *updateDeltaSeconds <= 0.0f ||
+        *updateDeltaSeconds > 1.0f || !std::isfinite(*sleepMilliseconds) ||
+        *sleepMilliseconds < 0.0f || *sleepMilliseconds > 1000.0f)
+    {
+        std::ostringstream message;
+        message << "Scheduler constants rejected: delta=" << *updateDeltaSeconds
+                << "s, sleep=" << *sleepMilliseconds
+                << "ms. This engine build does not contain the expected constants.";
+        Log(message.str());
         g_schedulerUpdateDeltaSeconds = nullptr;
         g_schedulerSleepMilliseconds = nullptr;
         return false;
@@ -5259,6 +5572,12 @@ bool InstallEngineHooks(HMODULE engineModule)
     const auto targetAddress =
         reinterpret_cast<void*>(reinterpret_cast<std::uintptr_t>(engineModule) +
                                 kEngineSettingsInitRva);
+    if (!MatchesCodeSignature(targetAddress, {0xA1, 0x60, 0x24, 0x1D, 0x11},
+                              "Engine settings initializer"))
+    {
+        return false;
+    }
+
     if (!InstallRelativeJumpDetour(targetAddress, kRelativeJumpLength,
                                    reinterpret_cast<void*>(&HookedEngineSettingsInit),
                                    reinterpret_cast<void**>(&g_originalEngineSettingsInit)))
@@ -5280,6 +5599,13 @@ bool InstallPreciseSleepHook(HMODULE engineModule)
 
     const auto targetAddress =
         reinterpret_cast<void*>(reinterpret_cast<std::uintptr_t>(engineModule) + kEngineSleepExRva);
+    if (!MatchesCodeSignature(targetAddress,
+                              {0x83, 0xEC, 0x08, 0x0F, 0xB6, 0x44, 0x24, 0x10},
+                              "Engine SleepEx"))
+    {
+        return false;
+    }
+
     if (!InstallRelativeJumpDetour(targetAddress, 8,
                                    reinterpret_cast<void*>(&HookedEngineSleepEx),
                                    reinterpret_cast<void**>(&g_originalEngineSleepEx)))
@@ -5302,6 +5628,13 @@ bool InstallSchedulerLoopUpdateHook(HMODULE engineModule)
     const auto targetAddress =
         reinterpret_cast<void*>(reinterpret_cast<std::uintptr_t>(engineModule) +
                                 kSchedulerLoopUpdateRva);
+    if (!MatchesCodeSignature(targetAddress,
+                              {0xA0, 0xCC, 0x6F, 0x59, 0x11, 0x84, 0xC0, 0x56},
+                              "Scheduler update"))
+    {
+        return false;
+    }
+
     if (!InstallRelativeJumpDetour(targetAddress, 8,
                                    reinterpret_cast<void*>(&HookedSchedulerLoopUpdate),
                                    reinterpret_cast<void**>(&g_originalSchedulerLoopUpdate)))
@@ -5324,6 +5657,13 @@ bool InstallGameplayUpdateHook(HMODULE engineModule)
     const auto targetAddress =
         reinterpret_cast<void*>(reinterpret_cast<std::uintptr_t>(engineModule) +
                                 kGameplayUpdateRva);
+    if (!MatchesCodeSignature(targetAddress,
+                              {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0},
+                              "Gameplay update"))
+    {
+        return false;
+    }
+
     if (!InstallRelativeJumpDetour(targetAddress, 6,
                                    reinterpret_cast<void*>(&HookedGameplayUpdate),
                                    reinterpret_cast<void**>(&g_originalGameplayUpdate)))
@@ -5736,6 +6076,9 @@ bool InstallHooks()
     }
 
     g_engineModule = engineModule;
+    LogModuleIdentity(engineModule, "g_SilentHill.sgl");
+    ApplyStockMainFrameInterval(engineModule);
+    ApplyHighResolutionUiFix(engineModule);
     ResolveEngineFrameBudgetPointers(engineModule);
     ResolveSchedulerTimingPointers(engineModule);
 
@@ -5768,148 +6111,13 @@ bool InstallHooks()
     return true;
 }
 
-void InstallDirect3D9VtableHooks()
-{
-    HMODULE d3d9Module = GetModuleHandleW(L"d3d9.dll");
-    if (d3d9Module == nullptr)
-    {
-        d3d9Module = LoadLibraryW(L"d3d9.dll");
-    }
-
-    if (d3d9Module == nullptr)
-    {
-        Log("d3d9.dll could not be loaded for vtable patching.");
-        return;
-    }
-
-    Direct3DCreate9Fn create9 = g_originalDirect3DCreate9;
-    if (create9 == nullptr)
-    {
-        create9 = reinterpret_cast<Direct3DCreate9Fn>(GetProcAddress(d3d9Module, "Direct3DCreate9"));
-    }
-
-    if (create9 == nullptr)
-    {
-        Log("Direct3DCreate9 export was unavailable.");
-        return;
-    }
-    g_originalDirect3DCreate9 = create9;
-
-    IDirect3D9* direct3d = create9(D3D_SDK_VERSION);
-    if (direct3d == nullptr)
-    {
-        Log("Direct3DCreate9 dummy object creation failed.");
-        return;
-    }
-
-    {
-        std::scoped_lock lock(g_hookMutex);
-        if (PatchVtableEntry(direct3d, kCreateDeviceVtableIndex,
-                             reinterpret_cast<void*>(&HookedCreateDevice),
-                             reinterpret_cast<void**>(&g_originalCreateDevice)))
-        {
-            Log("IDirect3D9::CreateDevice hook installed.");
-        }
-    }
-
-    HWND dummyWindow =
-        CreateWindowExW(0, L"STATIC", L"ShepherdPatchDummy", WS_POPUP, 0, 0, 1, 1, nullptr,
-                        nullptr, GetModuleHandleW(nullptr), nullptr);
-    if (dummyWindow != nullptr)
-    {
-        D3DPRESENT_PARAMETERS params = {};
-        params.Windowed = TRUE;
-        params.SwapEffect = D3DSWAPEFFECT_DISCARD;
-        params.hDeviceWindow = dummyWindow;
-
-        IDirect3DDevice9* device = nullptr;
-        const ScopedD3DProbeCreate probeCreate;
-        const HRESULT hr = direct3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, dummyWindow,
-                                                  D3DCREATE_SOFTWARE_VERTEXPROCESSING, &params,
-                                                  &device);
-        if (SUCCEEDED(hr) && device != nullptr)
-        {
-            device->Release();
-        }
-        else
-        {
-            Log("Dummy CreateDevice failed with " + FormatHr(hr));
-        }
-
-        DestroyWindow(dummyWindow);
-    }
-    else
-    {
-        Log("Dummy window creation failed.");
-    }
-
-    direct3d->Release();
-
-    const auto create9Ex =
-        reinterpret_cast<Direct3DCreate9ExFn>(GetProcAddress(d3d9Module, "Direct3DCreate9Ex"));
-    if (create9Ex == nullptr)
-    {
-        Log("Direct3DCreate9Ex export was unavailable.");
-        return;
-    }
-    g_originalDirect3DCreate9Ex = create9Ex;
-
-    IDirect3D9Ex* direct3dEx = nullptr;
-    if (FAILED(create9Ex(D3D_SDK_VERSION, &direct3dEx)) || direct3dEx == nullptr)
-    {
-        Log("Direct3DCreate9Ex dummy object creation failed.");
-        return;
-    }
-
-    {
-        std::scoped_lock lock(g_hookMutex);
-        if (PatchVtableEntry(direct3dEx, kCreateDeviceExVtableIndex,
-                             reinterpret_cast<void*>(&HookedCreateDeviceEx),
-                             reinterpret_cast<void**>(&g_originalCreateDeviceEx)))
-        {
-            Log("IDirect3D9Ex::CreateDeviceEx hook installed.");
-        }
-    }
-
-    HWND dummyWindowEx =
-        CreateWindowExW(0, L"STATIC", L"ShepherdPatchDummyEx", WS_POPUP, 0, 0, 1, 1, nullptr,
-                        nullptr, GetModuleHandleW(nullptr), nullptr);
-    if (dummyWindowEx != nullptr)
-    {
-        D3DPRESENT_PARAMETERS params = {};
-        params.Windowed = TRUE;
-        params.SwapEffect = D3DSWAPEFFECT_DISCARD;
-        params.hDeviceWindow = dummyWindowEx;
-
-        IDirect3DDevice9Ex* deviceEx = nullptr;
-        const ScopedD3DProbeCreate probeCreate;
-        const HRESULT hr =
-            direct3dEx->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, dummyWindowEx,
-                                       D3DCREATE_SOFTWARE_VERTEXPROCESSING, &params, nullptr,
-                                       &deviceEx);
-        if (SUCCEEDED(hr) && deviceEx != nullptr)
-        {
-            deviceEx->Release();
-        }
-        else
-        {
-            Log("Dummy CreateDeviceEx failed with " + FormatHr(hr));
-        }
-
-        DestroyWindow(dummyWindowEx);
-    }
-    else
-    {
-        Log("Dummy Ex window creation failed.");
-    }
-
-    direct3dEx->Release();
-}
-
 DWORD WINAPI InitializeThread(void*)
 {
     g_moduleDirectory = ResolveModuleDirectory(g_module);
+    InitializeLog();
     g_config = LoadConfigFromDisk();
+    LogPatchConfigSnapshot();
+    LogEngineConfigSnapshot();
     ApplyConfiguredEngineVarsOverrides();
     ApplyDpiAwareness();
     ApplyProcessExecutionPolicy();
@@ -5933,8 +6141,9 @@ DWORD WINAPI InitializeThread(void*)
         InstallShutdownDiagnosticsHooks(exeModule, "SilentHill.exe");
     const bool exeTimingHooksInstalled = InstallTimingDiagnosticsHooks(exeModule, "SilentHill.exe");
     const bool exeIntroHooksInstalled = InstallBinkMovieHooks(exeModule, "SilentHill.exe");
-    InstallDirect3D9VtableHooks();
     const bool engineHooksInstalled = InstallHooks();
+    Log("Direct3D startup uses the engine import hook; concurrent probe devices and global "
+        "driver-code detours are disabled.");
     (void)exeTimerHooksInstalled;
     (void)exeCrashHooksInstalled;
     (void)exeShutdownHooksInstalled;
