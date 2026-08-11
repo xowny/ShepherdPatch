@@ -5,6 +5,18 @@ namespace ShepherdConfigurator.Tests;
 public sealed class AdaptiveLayoutAdvisorTests
 {
     [Theory]
+    [InlineData(1360, 1.5, 906.6666666666666)]
+    [InlineData(1360, 1.0, 1360)]
+    [InlineData(1360, 0.0, 1360)]
+    public void ConvertsPhysicalWidthToEffectivePixels(
+        double physicalWidth, double rasterScale, double expected)
+    {
+        Assert.Equal(expected,
+            AdaptiveLayoutAdvisor.GetEffectiveWidth(physicalWidth, rasterScale),
+            precision: 10);
+    }
+
+    [Theory]
     [InlineData(640, AdaptiveLayoutMode.Compact)]
     [InlineData(960, AdaptiveLayoutMode.Standard)]
     [InlineData(1680, AdaptiveLayoutMode.Wide)]

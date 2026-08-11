@@ -28,6 +28,7 @@ public sealed partial class MainWindow : Window
     private bool _isLoading;
     private bool _isDirty;
     private bool _showAdvancedOptions;
+    private bool _isSelectingGameBin;
     private string? _configPath;
     private IniDocument? _loadedDocument;
     private DependencyStatus? _dependencyStatus;
@@ -107,21 +108,46 @@ public sealed partial class MainWindow : Window
         RefreshDependencyBanner();
         ApplyAdvancedOptionsVisibility();
         UpdateCardVisibility();
-        ApplyAdaptiveLayout(AdaptiveLayoutAdvisor.GetMode(AppWindow.Size.Width));
+        double rasterScale = Content.XamlRoot?.RasterizationScale ?? 1.0;
+        double effectiveWidth = AdaptiveLayoutAdvisor.GetEffectiveWidth(
+            AppWindow.Size.Width, rasterScale);
+        ApplyAdaptiveLayout(AdaptiveLayoutAdvisor.GetMode(effectiveWidth));
     }
 
     private void LoadConfiguration()
     {
         _configPath = ConfigFileService.ResolveConfigPath();
-        ConfigPathText.Text = _configPath ?? "No ShepherdPatch.ini found";
         if (_configPath is null)
         {
+            _loadedDocument = ConfigFileService.LoadDefaults();
+            ApplyDocumentToControls(_loadedDocument);
+            ConfigPathText.Text = "Choose the game Bin before saving";
             SetDirty(false);
             return;
         }
 
-        _loadedDocument = ConfigFileService.Load(_configPath);
+        if (!File.Exists(_configPath))
+        {
+            _loadedDocument = ConfigFileService.LoadDefaults();
+            ApplyDocumentToControls(_loadedDocument);
+            ConfigPathText.Text = $"New configuration will be created: {_configPath}";
+            SetDirty(false);
+            return;
+        }
+
+        if (!ConfigFileService.TryLoad(_configPath, out IniDocument loadedDocument))
+        {
+            _loadedDocument = ConfigFileService.LoadDefaults();
+            ApplyDocumentToControls(_loadedDocument);
+            ConfigPathText.Text =
+                "ShepherdPatch.ini could not be read. Check access to the file and try again.";
+            SetDirty(false);
+            return;
+        }
+
+        _loadedDocument = loadedDocument;
         ApplyDocumentToControls(_loadedDocument);
+        ConfigPathText.Text = _configPath;
         SetDirty(false);
     }
 
@@ -215,21 +241,21 @@ public sealed partial class MainWindow : Window
         SetValue(document, "EnableHudViewportClamp", EnableHudViewportClampToggle.IsChecked == true);
         SetValue(document, "ReduceBorderlessPresentStutter", ReduceBorderlessPresentStutterToggle.IsChecked == true);
         SetValue(document, "EnableFlipExSwapEffect", EnableFlipExSwapEffectToggle.IsChecked == true);
-        SetValue(document, "FallbackWidth", FallbackWidthBox.Value, 0);
-        SetValue(document, "FallbackHeight", FallbackHeightBox.Value, 0);
-        SetValue(document, "HudViewportAspectRatio", HudViewportAspectRatioBox.Value);
-        SetValue(document, "FallbackRefreshRate", FallbackRefreshRateBox.Value, 0);
+        SetFiniteValue(document, "FallbackWidth", FallbackWidthBox.Value, 0.0, 0);
+        SetFiniteValue(document, "FallbackHeight", FallbackHeightBox.Value, 0.0, 0);
+        SetFiniteValue(document, "HudViewportAspectRatio", HudViewportAspectRatioBox.Value, 16.0 / 9.0);
+        SetFiniteValue(document, "FallbackRefreshRate", FallbackRefreshRateBox.Value, 60.0, 0);
 
         SetValue(document, "EnableRawMouseInput", EnableRawMouseInputToggle.IsChecked == true);
         SetValue(document, "InvertRawMouseY", InvertRawMouseYToggle.IsChecked == true);
         SetValue(document, "HardenDirectInputMouseDevice", HardenDirectInputMouseDeviceToggle.IsChecked == true);
-        SetValue(document, "RawMouseSensitivity", RawMouseSensitivityBox.Value);
+        SetFiniteValue(document, "RawMouseSensitivity", RawMouseSensitivityBox.Value, 1.0);
 
         SetValue(document, "EnableFrameRateUnlock", EnableFrameRateUnlockToggle.IsChecked == true);
         SetValue(document, "DisableVsync", DisableVsyncToggle.IsChecked == true);
-        SetValue(document, "TargetFrameRate", TargetFrameRateBox.Value, 0);
-        SetValue(document, "MaximumPresentationInterval", MaximumPresentationIntervalBox.Value, 0);
-        SetValue(document, "PresentWakeLeadMilliseconds", PresentWakeLeadMillisecondsBox.Value);
+        SetFiniteValue(document, "TargetFrameRate", TargetFrameRateBox.Value, 60.0, 0);
+        SetFiniteValue(document, "MaximumPresentationInterval", MaximumPresentationIntervalBox.Value, 1.0, 0);
+        SetFiniteValue(document, "PresentWakeLeadMilliseconds", PresentWakeLeadMillisecondsBox.Value, 0.75);
 
         SetValue(document, "EnableHighPrecisionTiming", EnableHighPrecisionTimingToggle.IsChecked == true);
         SetValue(document, "RequestHighResolutionTimer", RequestHighResolutionTimerToggle.IsChecked == true);
@@ -243,8 +269,8 @@ public sealed partial class MainWindow : Window
         SetValue(document, "ReduceLegacyWaitableTimerPolling", ReduceLegacyWaitableTimerPollingToggle.IsChecked == true);
         SetValue(document, "HardenLegacyGraphicsRecovery", HardenLegacyGraphicsRecoveryToggle.IsChecked == true);
         SetValue(document, "HardenLegacyThreadWrapper", HardenLegacyThreadWrapperToggle.IsChecked == true);
-        SetValue(document, "LegacyGraphicsRetryDelayMilliseconds", LegacyGraphicsRetryDelayMillisecondsBox.Value, 0);
-        SetValue(document, "LegacyThreadTerminateGraceMilliseconds", LegacyThreadTerminateGraceMillisecondsBox.Value, 0);
+        SetFiniteValue(document, "LegacyGraphicsRetryDelayMilliseconds", LegacyGraphicsRetryDelayMillisecondsBox.Value, 100.0, 0);
+        SetFiniteValue(document, "LegacyThreadTerminateGraceMilliseconds", LegacyThreadTerminateGraceMillisecondsBox.Value, 250.0, 0);
 
         SetValue(document, "ReduceMenuMovieStutter", ReduceMenuMovieStutterToggle.IsChecked == true);
 
@@ -256,13 +282,10 @@ public sealed partial class MainWindow : Window
         document.SetValue(key, value ? "true" : "false");
     }
 
-    private static void SetValue(IniDocument document, string key, double value)
+    private static void SetFiniteValue(
+        IniDocument document, string key, double value, double fallback, int decimalPlaces = 3)
     {
-        document.SetValue(key, value.ToString("0.###", CultureInfo.InvariantCulture));
-    }
-
-    private static void SetValue(IniDocument document, string key, double value, int decimalPlaces)
-    {
+        value = double.IsFinite(value) ? value : fallback;
         string format = decimalPlaces <= 0 ? "0" : $"0.{new string('#', decimalPlaces)}";
         document.SetValue(key, value.ToString(format, CultureInfo.InvariantCulture));
     }
@@ -380,29 +403,43 @@ public sealed partial class MainWindow : Window
 
     private async void SelectGameBinButton_Click(object sender, RoutedEventArgs e)
     {
-        FolderPicker picker = new();
-        picker.FileTypeFilter.Add("*");
-        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-
-        Windows.Storage.StorageFolder? folder = await picker.PickSingleFolderAsync();
-        if (folder is null)
+        if (_isSelectingGameBin)
         {
             return;
         }
 
-        if (!await ConfirmConfigurationSwitchAsync())
+        _isSelectingGameBin = true;
+        SelectGameBinButton.IsEnabled = false;
+        try
         {
-            return;
-        }
+            FolderPicker picker = new();
+            picker.FileTypeFilter.Add("*");
+            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
 
-        if (!ConfigFileService.SetSelectedGameBinDirectory(folder.Path))
+            Windows.Storage.StorageFolder? folder = await picker.PickSingleFolderAsync();
+            if (folder is null || !await ConfirmConfigurationSwitchAsync())
+            {
+                return;
+            }
+
+            if (!ConfigFileService.SetSelectedGameBinDirectory(folder.Path))
+            {
+                ConfigPathText.Text = "Select the Bin folder that contains SilentHill.exe";
+                return;
+            }
+
+            LoadConfiguration();
+            RefreshDependencyBanner();
+        }
+        catch (Exception)
         {
-            ConfigPathText.Text = "Select the Bin folder that contains SilentHill.exe";
-            return;
+            ConfigPathText.Text = "The game Bin picker could not be opened. Try again.";
         }
-
-        LoadConfiguration();
-        RefreshDependencyBanner();
+        finally
+        {
+            _isSelectingGameBin = false;
+            SelectGameBinButton.IsEnabled = true;
+        }
     }
 
     private async System.Threading.Tasks.Task<bool> ConfirmConfigurationSwitchAsync()
@@ -441,6 +478,7 @@ public sealed partial class MainWindow : Window
     {
         if (_configPath is null)
         {
+            ConfigPathText.Text = "Choose the game Bin before saving";
             return false;
         }
 
@@ -465,7 +503,6 @@ public sealed partial class MainWindow : Window
     {
         if (_isDirty && !SaveConfiguration())
         {
-            ConfigPathText.Text = "Select a game Bin before running the game";
             return;
         }
 
