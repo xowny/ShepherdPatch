@@ -13,12 +13,15 @@ public static class AdaptiveLayoutAdvisor
 {
     public static AdaptiveLayoutMode GetMode(double width)
     {
-        if (width < 1180)
+        // WindowSizeChanged reports effective (DPI-scaled) pixels. Keep the
+        // compact breakpoint narrow enough that a normal 1360px window at
+        // 150% scaling does not collapse into a phone-like command stack.
+        if (width < 720)
         {
             return AdaptiveLayoutMode.Compact;
         }
 
-        if (width < 1540)
+        if (width < 1280)
         {
             return AdaptiveLayoutMode.Standard;
         }
@@ -33,7 +36,7 @@ public static class AdaptiveLayoutAdvisor
 
     public static int GetColumnCount(AdaptiveLayoutMode mode)
     {
-        return mode == AdaptiveLayoutMode.Compact ? 1 : 2;
+        return mode == AdaptiveLayoutMode.Wide ? 2 : 1;
     }
 
     public static IReadOnlyList<IReadOnlyList<T>> DistributeCards<T>(IReadOnlyList<T> items, Func<T, int> weightSelector, int columnCount)

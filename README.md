@@ -22,7 +22,9 @@ Nexus Mods: https://www.nexusmods.com/silenthillhomecoming/mods/10
 - Legacy timer, thread, and input hardening
 - Reduced menu movie stutter for known Bink menu-loop playback issues
 - Crash dump generation for troubleshooting
-- Standalone WinUI configurator for easier setup
+- Standalone WinUI configurator with a game-folder selector
+- Basic and advanced configuration views
+- Persistent Save and Run controls
 
 ## Project Layout
 

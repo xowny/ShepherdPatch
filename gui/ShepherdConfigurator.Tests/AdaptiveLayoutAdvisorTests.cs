@@ -5,8 +5,8 @@ namespace ShepherdConfigurator.Tests;
 public sealed class AdaptiveLayoutAdvisorTests
 {
     [Theory]
-    [InlineData(960, AdaptiveLayoutMode.Compact)]
-    [InlineData(1280, AdaptiveLayoutMode.Standard)]
+    [InlineData(640, AdaptiveLayoutMode.Compact)]
+    [InlineData(960, AdaptiveLayoutMode.Standard)]
     [InlineData(1680, AdaptiveLayoutMode.Wide)]
     public void ReturnsExpectedLayoutMode(double width, AdaptiveLayoutMode expected)
     {
@@ -15,7 +15,7 @@ public sealed class AdaptiveLayoutAdvisorTests
 
     [Theory]
     [InlineData(AdaptiveLayoutMode.Compact, 1)]
-    [InlineData(AdaptiveLayoutMode.Standard, 2)]
+    [InlineData(AdaptiveLayoutMode.Standard, 1)]
     [InlineData(AdaptiveLayoutMode.Wide, 2)]
     public void ReturnsExpectedColumnCount(AdaptiveLayoutMode mode, int expected)
     {

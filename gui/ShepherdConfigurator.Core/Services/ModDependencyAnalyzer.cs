@@ -13,13 +13,18 @@ public static class ModDependencyAnalyzer
         "version.dll"
     ];
 
-    public static DependencyStatus GetStatus(string? configPath, string? baseDirectory = null)
+    public static DependencyStatus GetStatus(
+        string? configPath,
+        string? baseDirectory = null,
+        string? selectedGameBinDirectory = null)
     {
-        string installDirectory = ResolveInstallDirectory(configPath);
+        string installDirectory = ResolveInstallDirectory(configPath, selectedGameBinDirectory);
 
-        List<string> missingFiles = RequiredFiles
-            .Where(fileName => !File.Exists(Path.Combine(installDirectory, fileName)))
-            .ToList();
+        List<string> missingFiles = string.IsNullOrWhiteSpace(installDirectory)
+            ? [.. RequiredFiles]
+            : RequiredFiles
+                .Where(fileName => !File.Exists(Path.Combine(installDirectory, fileName)))
+                .ToList();
 
         return new DependencyStatus(
             installDirectory,
@@ -27,7 +32,9 @@ public static class ModDependencyAnalyzer
             FindBundledDependencySource(baseDirectory ?? AppContext.BaseDirectory));
     }
 
-    public static string ResolveInstallDirectory(string? configPath)
+    public static string ResolveInstallDirectory(
+        string? configPath,
+        string? selectedGameBinDirectory = null)
     {
         if (!string.IsNullOrWhiteSpace(configPath))
         {
@@ -38,9 +45,17 @@ public static class ModDependencyAnalyzer
             }
         }
 
-        return Path.Combine(
+        if (!string.IsNullOrWhiteSpace(selectedGameBinDirectory) &&
+            LooksLikeGameBin(selectedGameBinDirectory))
+        {
+            return selectedGameBinDirectory;
+        }
+
+        string defaultSteamBin = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
             "Steam", "steamapps", "common", "Silent Hill Homecoming", "Bin");
+
+        return LooksLikeGameBin(defaultSteamBin) ? defaultSteamBin : string.Empty;
     }
 
     public static string? FindBundledDependencySource(string baseDirectory)
@@ -68,7 +83,7 @@ public static class ModDependencyAnalyzer
         return null;
     }
 
-    private static bool LooksLikeGameBin(string directory)
+    internal static bool LooksLikeGameBin(string directory)
     {
         return File.Exists(Path.Combine(directory, "SilentHill.exe")) ||
                File.Exists(Path.Combine(directory, "shv.dll"));
