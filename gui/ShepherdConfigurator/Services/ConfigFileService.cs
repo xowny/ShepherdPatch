@@ -150,11 +150,22 @@ public static class ConfigFileService
 
     public static IniDocument LoadDefaults()
     {
-        string defaultPath = Path.Combine(
-            AppContext.BaseDirectory, "Defaults", "ShepherdPatch.ini");
-        return TryLoad(defaultPath, out IniDocument document)
-            ? document
-            : IniDocument.Parse(string.Empty);
+        try
+        {
+            using Stream? stream = typeof(ConfigFileService).Assembly.GetManifestResourceStream(
+                "ShepherdConfigurator.Defaults.ShepherdPatch.ini");
+            if (stream is null)
+            {
+                return IniDocument.Parse(string.Empty);
+            }
+
+            using StreamReader reader = new(stream);
+            return IniDocument.Parse(reader.ReadToEnd());
+        }
+        catch (IOException)
+        {
+            return IniDocument.Parse(string.Empty);
+        }
     }
 
     public static void Save(string path, IniDocument document)
