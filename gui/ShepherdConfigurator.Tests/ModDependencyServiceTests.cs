@@ -70,6 +70,19 @@ public sealed class ModDependencyServiceTests
     }
 
     [Fact]
+    public void GameLaunchPlannerDoesNotSilentlyFallBackWhenSteamWasRequested()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        string binDirectory = Path.Combine(tempRoot, "Game", "Bin");
+        Directory.CreateDirectory(binDirectory);
+        File.WriteAllText(Path.Combine(binDirectory, "SilentHill.exe"), string.Empty);
+
+        Assert.Null(GameLaunchPlanner.Create(binDirectory, launchThroughSteam: true));
+
+        Directory.Delete(tempRoot, recursive: true);
+    }
+
+    [Fact]
     public void GameLaunchPlannerRejectsDirectoryWithoutGameExecutable()
     {
         string tempRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -115,6 +128,37 @@ public sealed class ModDependencyServiceTests
         string path = ModDependencyAnalyzer.ResolveInstallDirectory(null, binDirectory);
 
         Assert.Equal(binDirectory, path);
+
+        Directory.Delete(tempRoot, recursive: true);
+    }
+
+    [Fact]
+    public void ResolveInstallDirectoryPrefersSelectedBinOverConfigDirectory()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        string selectedBin = Path.Combine(tempRoot, "Selected", "Bin");
+        string configBin = Path.Combine(tempRoot, "Previous", "Bin");
+        Directory.CreateDirectory(selectedBin);
+        Directory.CreateDirectory(configBin);
+        File.WriteAllText(Path.Combine(selectedBin, "SilentHill.exe"), string.Empty);
+        File.WriteAllText(Path.Combine(configBin, "SilentHill.exe"), string.Empty);
+
+        string path = ModDependencyAnalyzer.ResolveInstallDirectory(
+            Path.Combine(configBin, "ShepherdPatch.ini"),
+            selectedBin);
+
+        Assert.Equal(selectedBin, path);
+        Directory.Delete(tempRoot, recursive: true);
+    }
+
+    [Fact]
+    public void GameBinValidationRequiresGameExecutable()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+        File.WriteAllText(Path.Combine(tempRoot, "shv.dll"), string.Empty);
+
+        Assert.False(ModDependencyAnalyzer.IsGameBinDirectory(tempRoot));
 
         Directory.Delete(tempRoot, recursive: true);
     }

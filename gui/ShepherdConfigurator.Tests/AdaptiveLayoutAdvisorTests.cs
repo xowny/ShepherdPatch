@@ -23,6 +23,16 @@ public sealed class AdaptiveLayoutAdvisorTests
     }
 
     [Fact]
+    public void ValueGridWrapsItemsAcrossDeclaredColumns()
+    {
+        Assert.Equal(2, AdaptiveLayoutAdvisor.GetGridRowCount(itemCount: 4, columnCount: 2));
+        Assert.Equal(new AdaptiveLayoutAdvisor.GridPosition(0, 0), AdaptiveLayoutAdvisor.GetGridPosition(0, 2));
+        Assert.Equal(new AdaptiveLayoutAdvisor.GridPosition(0, 1), AdaptiveLayoutAdvisor.GetGridPosition(1, 2));
+        Assert.Equal(new AdaptiveLayoutAdvisor.GridPosition(1, 0), AdaptiveLayoutAdvisor.GetGridPosition(2, 2));
+        Assert.Equal(new AdaptiveLayoutAdvisor.GridPosition(1, 1), AdaptiveLayoutAdvisor.GetGridPosition(3, 2));
+    }
+
+    [Fact]
     public void DistributeCardsBalancesColumnsWithoutBreakingOrder()
     {
         string[] cards = ["Display", "Input", "FrameRate", "Stability", "Advanced", "Movies"];

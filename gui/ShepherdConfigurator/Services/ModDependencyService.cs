@@ -40,11 +40,11 @@ public static class ModDependencyService
         GameLaunchPlan? launchPlan = GameLaunchPlanner.Create(
             installDirectory,
             launchThroughSteam);
-        if (launchPlan is null)
-        {
-            return false;
-        }
+        return launchPlan is not null && LaunchGame(launchPlan);
+    }
 
+    public static bool LaunchGame(GameLaunchPlan launchPlan)
+    {
         try
         {
             Process.Start(new ProcessStartInfo

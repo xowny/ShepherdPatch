@@ -623,12 +623,12 @@
                     BorderBrush="{StaticResource HomecomingSurfaceBorderBrush}"
                     BorderThickness="0,1,0,0"
                     Padding="12,8">
-                    <Grid ColumnSpacing="10">
+                    <Grid x:Name="FooterGrid" ColumnSpacing="10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <StackPanel x:Name="FooterStatusPanel" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                             <Border
                                 x:Name="DirtyIndicator"
                                 Background="{StaticResource HomecomingSurfaceInsetBrush}"
@@ -655,28 +655,31 @@
                                     Text="Experimental options visible" />
                             </Border>
                         </StackPanel>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                        <StackPanel x:Name="FooterActionsPanel" Grid.Column="1" Orientation="Horizontal" Spacing="8">
                             <CheckBox
                                 x:Name="LaunchThroughSteamCheckBox"
                                 Click="LaunchThroughSteamCheckBox_Click"
                                 Content="Launch through Steam"
+                                Style="{StaticResource HomecomingCheckBoxStyle}"
                                 ToolTipService.ToolTip="Optional. Uses Steam app 19000. Clear this option to launch SilentHill.exe directly."
                                 VerticalAlignment="Center" />
-                            <Button
-                                x:Name="DiscardButton"
-                                Click="DiscardButton_Click"
-                                Content="Discard"
-                                Style="{StaticResource HomecomingButtonStyle}" />
-                            <Button
-                                x:Name="SaveButton"
-                                Click="SaveButton_Click"
-                                Content="Save"
-                                Style="{StaticResource HomecomingButtonStyle}" />
-                            <Button
-                                x:Name="RunButton"
-                                Click="RunButton_Click"
-                                Content="Run"
-                                Style="{StaticResource HomecomingAccentButtonStyle}" />
+                            <StackPanel x:Name="FooterButtonsPanel" Orientation="Horizontal" Spacing="6">
+                                <Button
+                                    x:Name="DiscardButton"
+                                    Click="DiscardButton_Click"
+                                    Content="Discard"
+                                    Style="{StaticResource HomecomingButtonStyle}" />
+                                <Button
+                                    x:Name="SaveButton"
+                                    Click="SaveButton_Click"
+                                    Content="Save"
+                                    Style="{StaticResource HomecomingButtonStyle}" />
+                                <Button
+                                    x:Name="RunButton"
+                                    Click="RunButton_Click"
+                                    Content="Run"
+                                    Style="{StaticResource HomecomingAccentButtonStyle}" />
+                            </StackPanel>
                         </StackPanel>
                     </Grid>
                 </Border>

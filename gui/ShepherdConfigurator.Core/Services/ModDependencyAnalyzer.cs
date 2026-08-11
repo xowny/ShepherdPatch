@@ -36,26 +36,26 @@ public static class ModDependencyAnalyzer
         string? configPath,
         string? selectedGameBinDirectory = null)
     {
+        if (!string.IsNullOrWhiteSpace(selectedGameBinDirectory) &&
+            IsGameBinDirectory(selectedGameBinDirectory))
+        {
+            return Path.GetFullPath(selectedGameBinDirectory);
+        }
+
         if (!string.IsNullOrWhiteSpace(configPath))
         {
             string? directory = Path.GetDirectoryName(configPath);
-            if (!string.IsNullOrWhiteSpace(directory) && LooksLikeGameBin(directory))
+            if (!string.IsNullOrWhiteSpace(directory) && IsGameBinDirectory(directory))
             {
-                return directory;
+                return Path.GetFullPath(directory);
             }
-        }
-
-        if (!string.IsNullOrWhiteSpace(selectedGameBinDirectory) &&
-            LooksLikeGameBin(selectedGameBinDirectory))
-        {
-            return selectedGameBinDirectory;
         }
 
         string defaultSteamBin = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
             "Steam", "steamapps", "common", "Silent Hill Homecoming", "Bin");
 
-        return LooksLikeGameBin(defaultSteamBin) ? defaultSteamBin : string.Empty;
+        return IsGameBinDirectory(defaultSteamBin) ? defaultSteamBin : string.Empty;
     }
 
     public static string? FindBundledDependencySource(string baseDirectory)
@@ -83,10 +83,11 @@ public static class ModDependencyAnalyzer
         return null;
     }
 
-    internal static bool LooksLikeGameBin(string directory)
+    public static bool IsGameBinDirectory(string? directory)
     {
-        return File.Exists(Path.Combine(directory, "SilentHill.exe")) ||
-               File.Exists(Path.Combine(directory, "shv.dll"));
+        return !string.IsNullOrWhiteSpace(directory) &&
+               Directory.Exists(directory) &&
+               File.Exists(Path.Combine(directory, "SilentHill.exe"));
     }
 }
 

@@ -390,6 +390,11 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (!await ConfirmConfigurationSwitchAsync())
+        {
+            return;
+        }
+
         if (!ConfigFileService.SetSelectedGameBinDirectory(folder.Path))
         {
             ConfigPathText.Text = "Select the Bin folder that contains SilentHill.exe";
@@ -398,6 +403,33 @@ public sealed partial class MainWindow : Window
 
         LoadConfiguration();
         RefreshDependencyBanner();
+    }
+
+    private async System.Threading.Tasks.Task<bool> ConfirmConfigurationSwitchAsync()
+    {
+        if (!_isDirty)
+        {
+            return true;
+        }
+
+        ContentDialog dialog = new()
+        {
+            XamlRoot = ShellBorder.XamlRoot,
+            Title = "Unsaved changes",
+            Content = "Save changes to the current installation before choosing another Bin?",
+            PrimaryButtonText = "Save",
+            SecondaryButtonText = "Discard",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        ContentDialogResult result = await dialog.ShowAsync();
+        return result switch
+        {
+            ContentDialogResult.Primary => SaveConfiguration(),
+            ContentDialogResult.Secondary => true,
+            _ => false
+        };
     }
 
     private void SaveButton_Click(object sender, RoutedEventArgs e)
@@ -433,19 +465,43 @@ public sealed partial class MainWindow : Window
             RefreshDependencyBanner();
         }
 
-        if (_dependencyStatus is null ||
-            !ModDependencyService.LaunchGame(
-                _dependencyStatus.InstallDirectory,
-                LaunchThroughSteamCheckBox.IsChecked == true))
+        if (_dependencyStatus is null)
         {
             ConfigPathText.Text = "The game could not be launched from the selected Bin";
+            return;
+        }
+
+        bool launchThroughSteam = LaunchThroughSteamCheckBox.IsChecked == true;
+        GameLaunchPlan? launchPlan = GameLaunchPlanner.Create(
+            _dependencyStatus.InstallDirectory,
+            launchThroughSteam);
+        if (launchPlan is null)
+        {
+            ConfigPathText.Text = launchThroughSteam
+                ? "Steam launch is unavailable for this Bin. Clear 'Launch through Steam' to run SilentHill.exe directly."
+                : "SilentHill.exe was not found in the selected Bin";
+            return;
+        }
+
+        if (!ModDependencyService.LaunchGame(launchPlan))
+        {
+            ConfigPathText.Text = launchThroughSteam
+                ? "Steam could not launch the game"
+                : "SilentHill.exe could not be launched from the selected Bin";
         }
     }
 
     private void LaunchThroughSteamCheckBox_Click(object sender, RoutedEventArgs e)
     {
-        ConfigFileService.SetLaunchThroughSteamPreference(
-            LaunchThroughSteamCheckBox.IsChecked == true);
+        bool requestedValue = LaunchThroughSteamCheckBox.IsChecked == true;
+        if (ConfigFileService.SetLaunchThroughSteamPreference(requestedValue))
+        {
+            return;
+        }
+
+        LaunchThroughSteamCheckBox.IsChecked =
+            ConfigFileService.ResolveLaunchThroughSteamPreference();
+        ConfigPathText.Text = "The Steam launch preference could not be saved";
     }
 
     private void DiscardButton_Click(object sender, RoutedEventArgs e)
@@ -624,7 +680,40 @@ public sealed partial class MainWindow : Window
             ApplyValueGridLayout(valueGrid, compact);
         }
 
+        ApplyFooterLayout(compact);
         ApplyCardGridLayout(mode);
+    }
+
+    private void ApplyFooterLayout(bool compact)
+    {
+        FooterGrid.ColumnDefinitions.Clear();
+        FooterGrid.RowDefinitions.Clear();
+
+        FooterGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        FooterGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        Grid.SetColumn(FooterStatusPanel, 0);
+        Grid.SetRow(FooterStatusPanel, 0);
+
+        if (compact)
+        {
+            FooterGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetColumn(FooterActionsPanel, 0);
+            Grid.SetRow(FooterActionsPanel, 1);
+            FooterActionsPanel.Orientation = Orientation.Vertical;
+            FooterActionsPanel.HorizontalAlignment = HorizontalAlignment.Stretch;
+            FooterActionsPanel.Margin = new Thickness(0, 8, 0, 0);
+            FooterButtonsPanel.HorizontalAlignment = HorizontalAlignment.Right;
+            return;
+        }
+
+        FooterGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(FooterActionsPanel, 1);
+        Grid.SetRow(FooterActionsPanel, 0);
+        FooterActionsPanel.Orientation = Orientation.Horizontal;
+        FooterActionsPanel.HorizontalAlignment = HorizontalAlignment.Right;
+        FooterActionsPanel.Margin = default;
+        FooterButtonsPanel.HorizontalAlignment = HorizontalAlignment.Right;
     }
 
     private static void ApplyPairedRowLayout(Grid grid, bool compact)
@@ -695,20 +784,26 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        for (int i = 0; i < definition.DefaultColumnCount; i++)
+        int columnCount = Math.Max(1, definition.DefaultColumnCount);
+        for (int i = 0; i < columnCount; i++)
         {
             definition.Grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         }
 
-        definition.Grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        int rowCount = AdaptiveLayoutAdvisor.GetGridRowCount(children.Count, columnCount);
+        for (int i = 0; i < rowCount; i++)
+        {
+            definition.Grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        }
 
         for (int i = 0; i < children.Count; i++)
         {
             FrameworkElement element = (FrameworkElement)children[i];
-            Grid.SetColumn(element, i);
-            Grid.SetRow(element, 0);
+            AdaptiveLayoutAdvisor.GridPosition position = AdaptiveLayoutAdvisor.GetGridPosition(i, columnCount);
+            Grid.SetColumn(element, position.Column);
+            Grid.SetRow(element, position.Row);
 
-            element.Margin = default;
+            element.Margin = position.Row == rowCount - 1 ? default : new Thickness(0, 0, 0, 12);
         }
     }
 

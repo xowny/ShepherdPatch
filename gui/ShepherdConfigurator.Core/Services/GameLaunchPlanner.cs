@@ -39,8 +39,13 @@ public static class GameLaunchPlanner
             return null;
         }
 
-        if (launchThroughSteam && IsSteamInstallation(fullInstallDirectory))
+        if (launchThroughSteam)
         {
+            if (!IsSteamInstallation(fullInstallDirectory))
+            {
+                return null;
+            }
+
             return new GameLaunchPlan(
                 GameLaunchKind.Steam,
                 $"steam://run/{SteamAppId}",

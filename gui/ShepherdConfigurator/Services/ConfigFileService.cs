@@ -25,7 +25,8 @@ public static class ConfigFileService
         string? selectedGameBin = ResolveSelectedGameBinDirectory();
         if (selectedGameBin is not null)
         {
-            candidates.Add(Path.Combine(selectedGameBin, "ShepherdPatch.ini"));
+            string selectedConfigPath = Path.Combine(selectedGameBin, "ShepherdPatch.ini");
+            return File.Exists(selectedConfigPath) ? selectedConfigPath : null;
         }
 
         string baseDirectory = AppContext.BaseDirectory;
@@ -114,33 +115,33 @@ public static class ConfigFileService
         }
     }
 
-    public static void SetLaunchThroughSteamPreference(bool enabled)
+    public static bool SetLaunchThroughSteamPreference(bool enabled)
     {
         string? parentDirectory = Path.GetDirectoryName(LaunchThroughSteamPath);
         if (string.IsNullOrWhiteSpace(parentDirectory))
         {
-            return;
+            return false;
         }
 
         try
         {
             Directory.CreateDirectory(parentDirectory);
             File.WriteAllText(LaunchThroughSteamPath, enabled.ToString());
+            return true;
         }
         catch (IOException)
         {
+            return false;
         }
         catch (UnauthorizedAccessException)
         {
+            return false;
         }
     }
 
     public static bool IsGameBinDirectory(string? path)
     {
-        return !string.IsNullOrWhiteSpace(path) &&
-               Directory.Exists(path) &&
-               (File.Exists(Path.Combine(path, "SilentHill.exe")) ||
-                File.Exists(Path.Combine(path, "shv.dll")));
+        return ModDependencyAnalyzer.IsGameBinDirectory(path);
     }
 
     public static IniDocument Load(string path)

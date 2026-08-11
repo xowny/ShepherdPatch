@@ -11,6 +11,8 @@ public enum AdaptiveLayoutMode
 
 public static class AdaptiveLayoutAdvisor
 {
+    public readonly record struct GridPosition(int Row, int Column);
+
     public static AdaptiveLayoutMode GetMode(double width)
     {
         // WindowSizeChanged reports effective (DPI-scaled) pixels. Keep the
@@ -37,6 +39,36 @@ public static class AdaptiveLayoutAdvisor
     public static int GetColumnCount(AdaptiveLayoutMode mode)
     {
         return mode == AdaptiveLayoutMode.Wide ? 2 : 1;
+    }
+
+    public static int GetGridRowCount(int itemCount, int columnCount)
+    {
+        if (itemCount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(itemCount));
+        }
+
+        if (columnCount < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(columnCount));
+        }
+
+        return Math.Max(1, (itemCount + columnCount - 1) / columnCount);
+    }
+
+    public static GridPosition GetGridPosition(int itemIndex, int columnCount)
+    {
+        if (itemIndex < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(itemIndex));
+        }
+
+        if (columnCount < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(columnCount));
+        }
+
+        return new GridPosition(itemIndex / columnCount, itemIndex % columnCount);
     }
 
     public static IReadOnlyList<IReadOnlyList<T>> DistributeCards<T>(IReadOnlyList<T> items, Func<T, int> weightSelector, int columnCount)
