@@ -36,6 +36,33 @@ TEST_CASE(HighResolutionUiSelectsGroupsUsingBothDimensions)
     CHECK_TRUE(NearlyEqual(values.panelExtentX, 1980.0));
 }
 
+TEST_CASE(HighResolutionUiUsesGroundTruth640By480PanelConstants)
+{
+    const auto values = shh::ResolveHighResolutionUiConstants(640, 480);
+    CHECK_TRUE(NearlyEqual(values.panelScale, 0.5));
+    CHECK_TRUE(NearlyEqual(values.panelOffsetX, 300.0));
+    CHECK_TRUE(NearlyEqual(values.panelExtentX, 490.0));
+    CHECK_TRUE(NearlyEqual(values.itemScale, 0.0015812500116415321));
+}
+
+TEST_CASE(HighResolutionUiUsesGroundTruth1152By864PanelConstants)
+{
+    const auto values = shh::ResolveHighResolutionUiConstants(1152, 864);
+    CHECK_TRUE(NearlyEqual(values.panelScale, 0.75));
+    CHECK_TRUE(NearlyEqual(values.panelOffsetX, 550.0));
+    CHECK_TRUE(NearlyEqual(values.panelExtentX, 910.0));
+    CHECK_TRUE(NearlyEqual(values.itemScale, 0.0007812500116415322));
+}
+
+TEST_CASE(HighResolutionUiUsesGroundTruth1280By720PanelConstants)
+{
+    const auto values = shh::ResolveHighResolutionUiConstants(1280, 720);
+    CHECK_TRUE(NearlyEqual(values.panelScale, 0.75));
+    CHECK_TRUE(NearlyEqual(values.panelOffsetX, 670.0));
+    CHECK_TRUE(NearlyEqual(values.panelExtentX, 940.0));
+    CHECK_TRUE(NearlyEqual(values.itemScale, 0.0007812500116415322));
+}
+
 TEST_CASE(HighResolutionUiKeepsPanelAndItemTiersTogether)
 {
     const auto values = shh::ResolveHighResolutionUiConstants(1366, 1024);

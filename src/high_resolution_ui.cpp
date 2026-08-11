@@ -18,12 +18,13 @@ struct PanelResolutionGroup
 
 // The game uses discrete layouts for its textured map and document panels.
 // Text is laid out separately and already scales correctly.
-constexpr std::array<PanelResolutionGroup, 24> kPanelGroups{{
-    {640, 480, 0.50f, 640.0f, 490.0f, 0.0015812500116415321},
+constexpr std::array<PanelResolutionGroup, 25> kPanelGroups{{
+    {640, 480, 0.50f, 300.0f, 490.0f, 0.0015812500116415321},
     {720, 576, 0.50f, 340.0f, 560.0f, 0.0012812500116415322},
     {800, 600, 0.75f, 380.0f, 580.0f, 0.0012812500116415322},
     {1024, 768, 0.75f, 490.0f, 790.0f, 0.0009812500116415323},
-    {1150, 864, 0.75f, 550.0f, 910.0f, 0.0007812500116415322},
+    {1152, 864, 0.75f, 550.0f, 910.0f, 0.0007812500116415322},
+    {1280, 720, 0.75f, 670.0f, 940.0f, 0.0007812500116415322},
     {1280, 1024, 0.75f, 620.0f, 1030.0f, 0.0007812500116415322},
     {1360, 768, 0.75f, 660.0f, 1100.0f, 0.0007812500116415322},
     {1366, 768, 0.75f, 660.0f, 1108.0f, 0.0007812500116415322},

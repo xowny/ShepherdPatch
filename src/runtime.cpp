@@ -63,6 +63,7 @@ namespace
 {
 using Direct3DCreate9Fn = IDirect3D9*(WINAPI*)(UINT);
 using Direct3DCreate9ExFn = HRESULT(WINAPI*)(UINT, IDirect3D9Ex**);
+using LoadLibraryAFn = HMODULE(WINAPI*)(LPCSTR);
 using CreateDeviceFn =
     HRESULT(STDMETHODCALLTYPE*)(IDirect3D9*, UINT, D3DDEVTYPE, HWND, DWORD,
                                 D3DPRESENT_PARAMETERS*, IDirect3DDevice9**);
@@ -204,6 +205,7 @@ constexpr std::size_t kDefaultFovOffset = 0x114;
 constexpr std::size_t kCurrentFovOffset = 0x118;
 constexpr DWORD kInitRetryCount = 200;
 constexpr DWORD kInitRetryDelayMs = 50;
+constexpr DWORD kConfigurationPublicationWaitMs = 5000;
 constexpr std::uint32_t kBinkOpenLogLimit = 16;
 constexpr std::uint32_t kBinkPlaybackLogLimit = 24;
 constexpr DWORD kLostDeviceDeactivateWindowMs = 8000;
@@ -251,6 +253,12 @@ struct TrackedBinkMovieState
 
 Direct3DCreate9Fn g_originalDirect3DCreate9 = nullptr;
 Direct3DCreate9ExFn g_originalDirect3DCreate9Ex = nullptr;
+LoadLibraryAFn g_originalLoadLibraryA = nullptr;
+std::atomic<bool> g_engineDirect3DCreateHookInstalled = false;
+std::atomic<bool> g_executableLoadLibraryHookInstalled = false;
+std::atomic<bool> g_runtimeConfigurationPublished = false;
+std::atomic<bool> g_runtimeInitializationFailed = false;
+HANDLE g_runtimeConfigurationEvent = nullptr;
 CreateDeviceFn g_originalCreateDevice = nullptr;
 CreateDeviceExFn g_originalCreateDeviceEx = nullptr;
 TestCooperativeLevelFn g_originalTestCooperativeLevel = nullptr;
@@ -2786,8 +2794,10 @@ HRESULT STDMETHODCALLTYPE HookedSetTransform(IDirect3DDevice9* device,
                                              const D3DMATRIX* matrix);
 HRESULT STDMETHODCALLTYPE HookedSetViewport(IDirect3DDevice9* device,
                                             CONST D3DVIEWPORT9* viewport);
+bool WaitForPublishedRuntimeConfiguration();
 IDirect3D9* WINAPI HookedDirect3DCreate9(UINT sdkVersion);
 HRESULT WINAPI HookedDirect3DCreate9Ex(UINT sdkVersion, IDirect3D9Ex** returnedInterface);
+HMODULE WINAPI HookedLoadLibraryA(LPCSTR fileName);
 DWORD WINAPI HookedGetTickCount();
 LONG WINAPI HookedUnhandledExceptionFilter(EXCEPTION_POINTERS* exceptionPointers);
 LPTOP_LEVEL_EXCEPTION_FILTER WINAPI HookedSetUnhandledExceptionFilter(
@@ -2984,6 +2994,15 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
         return E_FAIL;
     }
 
+    // Configuration publication occurs before the worker loads any additional
+    // modules. Keep this wait out of the LoadLibraryA callback and loader path.
+    if (!WaitForPublishedRuntimeConfiguration())
+    {
+        Log("Runtime configuration was unavailable before CreateDevice; using the stock call.");
+        return g_originalCreateDevice(direct3d, adapter, deviceType, focusWindow,
+                                      behaviorFlags, presentationParameters, returnedDevice);
+    }
+
     D3DPRESENT_PARAMETERS workingParams = {};
     D3DPRESENT_PARAMETERS retryParams = {};
     D3DPRESENT_PARAMETERS* paramsForCall = presentationParameters;
@@ -3124,6 +3143,14 @@ HRESULT STDMETHODCALLTYPE HookedCreateDeviceEx(IDirect3D9Ex* direct3d, UINT adap
     if (g_originalCreateDeviceEx == nullptr)
     {
         return E_FAIL;
+    }
+
+    if (!WaitForPublishedRuntimeConfiguration())
+    {
+        Log("Runtime configuration was unavailable before CreateDeviceEx; using the stock call.");
+        return g_originalCreateDeviceEx(direct3d, adapter, deviceType, focusWindow,
+                                        behaviorFlags, presentationParameters,
+                                        fullscreenDisplayMode, returnedDevice);
     }
 
     D3DPRESENT_PARAMETERS workingParams = {};
@@ -3307,6 +3334,99 @@ HRESULT WINAPI HookedDirect3DCreate9Ex(UINT sdkVersion, IDirect3D9Ex** returnedI
     }
 
     return hr;
+}
+
+bool InstallEngineDirect3DCreateHook(HMODULE engineModule)
+{
+    if (engineModule == nullptr || g_engineDirect3DCreateHookInstalled.load())
+    {
+        return g_engineDirect3DCreateHookInstalled.load();
+    }
+
+    std::scoped_lock lock(g_hookMutex);
+    if (g_engineDirect3DCreateHookInstalled.load())
+    {
+        return true;
+    }
+
+    if (!InstallIatHook(engineModule, "d3d9.dll", "Direct3DCreate9",
+                        reinterpret_cast<void*>(&HookedDirect3DCreate9),
+                        reinterpret_cast<void**>(&g_originalDirect3DCreate9)))
+    {
+        return false;
+    }
+
+    g_engineDirect3DCreateHookInstalled.store(true);
+    Log("Engine Direct3DCreate9 IAT hook installed.");
+    return true;
+}
+
+bool InstallExecutableLoadLibraryHook(HMODULE executableModule)
+{
+    if (executableModule == nullptr || g_executableLoadLibraryHookInstalled.load())
+    {
+        return g_executableLoadLibraryHookInstalled.load();
+    }
+
+    if (!InstallIatHook(executableModule, "kernel32.dll", "LoadLibraryA",
+                        reinterpret_cast<void*>(&HookedLoadLibraryA),
+                        reinterpret_cast<void**>(&g_originalLoadLibraryA)))
+    {
+        return false;
+    }
+
+    g_executableLoadLibraryHookInstalled.store(true);
+    return true;
+}
+
+bool WaitForPublishedRuntimeConfiguration()
+{
+    if (g_runtimeConfigurationPublished.load(std::memory_order_acquire))
+    {
+        return true;
+    }
+
+    if (g_runtimeInitializationFailed.load(std::memory_order_acquire) ||
+        g_runtimeConfigurationEvent == nullptr)
+    {
+        return false;
+    }
+
+    const DWORD waitResult = WaitForSingleObject(
+        g_runtimeConfigurationEvent, kConfigurationPublicationWaitMs);
+    return waitResult == WAIT_OBJECT_0 &&
+           g_runtimeConfigurationPublished.load(std::memory_order_acquire);
+}
+
+HMODULE WINAPI HookedLoadLibraryA(LPCSTR fileName)
+{
+    if (g_originalLoadLibraryA == nullptr)
+    {
+        return nullptr;
+    }
+
+    HMODULE loadedModule = g_originalLoadLibraryA(fileName);
+    if (loadedModule == nullptr || fileName == nullptr)
+    {
+        return loadedModule;
+    }
+
+    const char* baseName = std::strrchr(fileName, '\\');
+    const char* forwardSlash = std::strrchr(fileName, '/');
+    if (forwardSlash != nullptr && (baseName == nullptr || forwardSlash > baseName))
+    {
+        baseName = forwardSlash;
+    }
+    baseName = baseName != nullptr ? baseName + 1 : fileName;
+
+    if (_stricmp(baseName, "g_SilentHill.sgl") == 0)
+    {
+        // Do not wait for configuration from this loader callback. The device
+        // hooks acquire the published configuration before their first read.
+        InstallEngineDirect3DCreateHook(loadedModule);
+    }
+
+    return loadedModule;
 }
 
 DWORD WINAPI HookedGetTickCount()
@@ -6075,6 +6195,11 @@ bool InstallHooks()
         return false;
     }
 
+    if (!InstallEngineDirect3DCreateHook(engineModule))
+    {
+        Log("Failed to patch Direct3DCreate9 import before installing engine hooks.");
+    }
+
     g_engineModule = engineModule;
     LogModuleIdentity(engineModule, "g_SilentHill.sgl");
     ApplyStockMainFrameInterval(engineModule);
@@ -6095,15 +6220,6 @@ bool InstallHooks()
     installedAnyHook |= InstallDirectInputHooks(engineModule);
     installedAnyHook |= InstallTimingDiagnosticsHooks(engineModule, "g_SilentHill.sgl");
 
-    if (!InstallIatHook(engineModule, "d3d9.dll", "Direct3DCreate9",
-                        reinterpret_cast<void*>(&HookedDirect3DCreate9),
-                        reinterpret_cast<void**>(&g_originalDirect3DCreate9)))
-    {
-        Log("Failed to patch Direct3DCreate9 import.");
-        return installedAnyHook;
-    }
-
-    Log("Direct3DCreate9 IAT hook installed.");
     if (!WaitForAndInstallShvHooks(kInitRetryCount, kInitRetryDelayMs))
     {
         Log("shv.dll was not available during the startup hook window.");
@@ -6116,6 +6232,13 @@ DWORD WINAPI InitializeThread(void*)
     g_moduleDirectory = ResolveModuleDirectory(g_module);
     InitializeLog();
     g_config = LoadConfigFromDisk();
+    // No code writes g_config after this release store. Early hook callbacks
+    // acquire this state before they expose the Direct3D device hooks.
+    g_runtimeConfigurationPublished.store(true, std::memory_order_release);
+    if (g_runtimeConfigurationEvent != nullptr)
+    {
+        SetEvent(g_runtimeConfigurationEvent);
+    }
     LogPatchConfigSnapshot();
     LogEngineConfigSnapshot();
     ApplyConfiguredEngineVarsOverrides();
@@ -6135,6 +6258,18 @@ DWORD WINAPI InitializeThread(void*)
     ApplyHighResolutionTimerRequest();
 
     const HMODULE exeModule = GetModuleHandleW(nullptr);
+    if (InstallExecutableLoadLibraryHook(exeModule))
+    {
+        Log("Executable LoadLibraryA hook installed for early engine interception.");
+    }
+    else
+    {
+        Log("Executable LoadLibraryA hook was unavailable; module polling remains active.");
+    }
+
+    // Close the race where the engine loaded immediately before the executable
+    // import was patched. InstallHooks retains polling as the final fallback.
+    InstallEngineDirect3DCreateHook(GetModuleHandleW(L"g_SilentHill.sgl"));
     const bool exeTimerHooksInstalled = InstallTimerHooks(exeModule, "SilentHill.exe");
     const bool exeCrashHooksInstalled = InstallCrashDumpHooks(exeModule, "SilentHill.exe");
     const bool exeShutdownHooksInstalled =
@@ -6142,7 +6277,7 @@ DWORD WINAPI InitializeThread(void*)
     const bool exeTimingHooksInstalled = InstallTimingDiagnosticsHooks(exeModule, "SilentHill.exe");
     const bool exeIntroHooksInstalled = InstallBinkMovieHooks(exeModule, "SilentHill.exe");
     const bool engineHooksInstalled = InstallHooks();
-    Log("Direct3D startup uses the engine import hook; concurrent probe devices and global "
+    Log("Direct3D startup uses an early engine import hook; concurrent probe devices and global "
         "driver-code detours are disabled.");
     (void)exeTimerHooksInstalled;
     (void)exeCrashHooksInstalled;
@@ -6162,6 +6297,14 @@ BOOL CALLBACK StartRuntimeInitialization(PINIT_ONCE, PVOID parameter, PVOID*)
     {
         CloseHandle(thread);
     }
+    else
+    {
+        g_runtimeInitializationFailed.store(true, std::memory_order_release);
+        if (g_runtimeConfigurationEvent != nullptr)
+        {
+            SetEvent(g_runtimeConfigurationEvent);
+        }
+    }
 
     return TRUE;
 }
@@ -6169,11 +6312,22 @@ BOOL CALLBACK StartRuntimeInitialization(PINIT_ONCE, PVOID parameter, PVOID*)
 
 void OnProcessAttach(HMODULE module)
 {
+    g_runtimeConfigurationEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    // Patch the executable import while its loader is still serializing DLL
+    // initialization. This removes the worker-thread race with the game's
+    // first engine and Direct3D calls without creating a probe device.
+    InstallExecutableLoadLibraryHook(GetModuleHandleW(nullptr));
     InitOnceExecuteOnce(&g_runtimeInitOnce, &StartRuntimeInitialization, module, nullptr);
 }
 
 void OnProcessDetach()
 {
+    if (g_runtimeConfigurationEvent != nullptr)
+    {
+        CloseHandle(g_runtimeConfigurationEvent);
+        g_runtimeConfigurationEvent = nullptr;
+    }
+
     CloseLegacyWaitableTimerWorkerHandle();
 
     if (g_renderThreadMmcssHandle != nullptr && g_avRevertMmThreadCharacteristics != nullptr)
