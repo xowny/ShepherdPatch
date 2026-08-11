@@ -18,6 +18,7 @@ set(SHH_CORE_SOURCES
     src/execution_policy.cpp
     src/frame_rate_override.cpp
     src/gameplay_delta.cpp
+    src/high_resolution_ui.cpp
     src/intro_skip.cpp
     src/legacy_runtime_policy.cpp
     src/lost_device_policy.cpp
@@ -74,6 +75,7 @@ add_executable(ShepherdPatchTests
     tests/test_execution_policy.cpp
     tests/test_frame_rate_override.cpp
     tests/test_gameplay_delta.cpp
+    tests/test_high_resolution_ui.cpp
     tests/test_intro_skip.cpp
     tests/test_legacy_runtime_policy.cpp
     tests/test_lost_device_policy.cpp
@@ -101,6 +103,7 @@ add_executable(ShepherdPatchTests
     src/execution_policy.cpp
     src/frame_rate_override.cpp
     src/gameplay_delta.cpp
+    src/high_resolution_ui.cpp
     src/intro_skip.cpp
     src/legacy_runtime_policy.cpp
     src/lost_device_policy.cpp

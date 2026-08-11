@@ -11,6 +11,7 @@ struct Config
     bool enableSafeResolutionChanges = true;
     bool enableDpiAwareness = true;
     bool enableUltrawideFovFix = true;
+    bool enableHighResolutionUiFix = true;
     bool forceBorderless = false;
     bool retryResetInWindowedMode = true;
     bool enableHighPrecisionTiming = true;
@@ -26,7 +27,7 @@ struct Config
     bool disablePowerThrottling = true;
     bool disableVsync = false;
     bool disableLegacyPeriodicIconicTimer = true;
-    bool reduceLegacyWaitableTimerPolling = true;
+    bool reduceLegacyWaitableTimerPolling = false;
     bool hardenLegacyGraphicsRecovery = true;
     bool hardenLegacyThreadWrapper = true;
     bool hardenDirectInputMouseDevice = true;

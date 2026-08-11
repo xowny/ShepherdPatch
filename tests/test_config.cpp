@@ -10,6 +10,7 @@ TEST_CASE(ParseConfigReadsBoolAndIntegerOverrides)
         "EnableSafeResolutionChanges = false\n"
         "EnableDpiAwareness = false\n"
         "EnableUltrawideFovFix = false\n"
+        "EnableHighResolutionUiFix = false\n"
         "ForceBorderless = false\n"
         "RetryResetInWindowedMode = true\n"
         "EnableHighPrecisionTiming = false\n"
@@ -48,6 +49,7 @@ TEST_CASE(ParseConfigReadsBoolAndIntegerOverrides)
     CHECK_TRUE(!config.enableSafeResolutionChanges);
     CHECK_TRUE(!config.enableDpiAwareness);
     CHECK_TRUE(!config.enableUltrawideFovFix);
+    CHECK_TRUE(!config.enableHighResolutionUiFix);
     CHECK_TRUE(!config.forceBorderless);
     CHECK_TRUE(config.retryResetInWindowedMode);
     CHECK_TRUE(!config.enableHighPrecisionTiming);
@@ -95,6 +97,7 @@ TEST_CASE(ParseConfigUsesConservativeDefaultsWhenFileIsMissing)
     CHECK_TRUE(config.enableSafeResolutionChanges);
     CHECK_TRUE(config.enableDpiAwareness);
     CHECK_TRUE(config.enableUltrawideFovFix);
+    CHECK_TRUE(config.enableHighResolutionUiFix);
     CHECK_TRUE(!config.forceBorderless);
     CHECK_TRUE(config.retryResetInWindowedMode);
     CHECK_TRUE(config.enableHighPrecisionTiming);
@@ -108,7 +111,7 @@ TEST_CASE(ParseConfigUsesConservativeDefaultsWhenFileIsMissing)
     CHECK_TRUE(config.disablePowerThrottling);
     CHECK_TRUE(!config.disableVsync);
     CHECK_TRUE(config.disableLegacyPeriodicIconicTimer);
-    CHECK_TRUE(config.reduceLegacyWaitableTimerPolling);
+    CHECK_TRUE(!config.reduceLegacyWaitableTimerPolling);
     CHECK_TRUE(config.hardenLegacyGraphicsRecovery);
     CHECK_TRUE(config.hardenLegacyThreadWrapper);
     CHECK_TRUE(config.hardenDirectInputMouseDevice);
