@@ -3021,6 +3021,9 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
         g_config.retryResetInWindowedMode)
     {
         retryParams = *presentationParameters;
+        const HWND retryTargetWindow =
+            retryParams.hDeviceWindow != nullptr ? retryParams.hDeviceWindow : focusWindow;
+        FillMissingBorderlessDimensions(retryTargetWindow, retryParams);
         const PresentParams retry =
             BuildRetryResetParams(ToPresentParams(retryParams), g_config);
         ApplyPresentParams(retry, retryParams);
@@ -3159,6 +3162,9 @@ HRESULT STDMETHODCALLTYPE HookedCreateDeviceEx(IDirect3D9Ex* direct3d, UINT adap
         g_config.retryResetInWindowedMode)
     {
         retryParams = *presentationParameters;
+        const HWND retryTargetWindow =
+            retryParams.hDeviceWindow != nullptr ? retryParams.hDeviceWindow : focusWindow;
+        FillMissingBorderlessDimensions(retryTargetWindow, retryParams);
         const PresentParams retry =
             BuildRetryResetParams(ToPresentParams(retryParams), g_config, true);
         ApplyPresentParams(retry, retryParams);
@@ -5180,10 +5186,12 @@ bool ApplyStockMainFrameInterval(HMODULE engineModule)
         return false;
     }
 
+    constexpr float kExpectedStockIntervalMilliseconds = 1000.0f / 30.0f;
+    constexpr float kStockIntervalToleranceMilliseconds = 0.1f;
     const float originalIntervalMilliseconds = *intervalMilliseconds;
     if (!std::isfinite(originalIntervalMilliseconds) ||
-        originalIntervalMilliseconds < 30.0f ||
-        originalIntervalMilliseconds > 35.0f)
+        std::fabs(originalIntervalMilliseconds - kExpectedStockIntervalMilliseconds) >
+            kStockIntervalToleranceMilliseconds)
     {
         std::ostringstream message;
         message << "Stock main frame interval patch skipped: expected a 30 FPS interval, found "
