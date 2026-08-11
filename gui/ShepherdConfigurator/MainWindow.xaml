@@ -25,7 +25,9 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <Border Grid.Row="0" Background="{StaticResource HomecomingAccentBrush}" />
@@ -36,18 +38,13 @@
                     BorderBrush="{StaticResource HomecomingSurfaceBorderBrush}"
                     BorderThickness="0,0,0,1"
                     Padding="14,10">
-                    <Grid ColumnSpacing="14" RowSpacing="6">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
+                    <Grid ColumnSpacing="14">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
                         <StackPanel
-                            Grid.RowSpan="2"
                             Orientation="Horizontal"
                             Spacing="10"
                             VerticalAlignment="Top">
@@ -68,6 +65,7 @@
                         </StackPanel>
 
                         <Border
+                            x:Name="ActiveIniBorder"
                             Grid.Column="1"
                             Background="{StaticResource HomecomingSurfaceBrush}"
                             BorderBrush="{StaticResource HomecomingSurfaceBorderBrush}"
@@ -86,61 +84,47 @@
                             </StackPanel>
                         </Border>
 
-                        <StackPanel
-                            x:Name="HeaderCommandBar"
-                            Grid.Row="1"
-                            Grid.Column="1"
-                            HorizontalAlignment="Right"
-                            Orientation="Horizontal"
-                            Spacing="6"
-                            VerticalAlignment="Bottom">
-                            <Border
-                                x:Name="DirtyIndicator"
-                                Background="{StaticResource HomecomingSurfaceInsetBrush}"
-                                BorderBrush="{StaticResource HomecomingSurfaceBorderBrush}"
-                                BorderThickness="1"
-                                CornerRadius="4"
-                                Padding="10,6">
-                                <TextBlock
-                                    x:Name="DirtyIndicatorText"
-                                    Style="{StaticResource StatusTextStyle}"
-                                    Text="No pending changes" />
-                            </Border>
-                            <Border
-                                x:Name="ExperimentalNotice"
-                                Background="{StaticResource HomecomingSurfaceInsetBrush}"
-                                BorderBrush="{StaticResource HomecomingAccentBrush}"
-                                BorderThickness="1"
-                                CornerRadius="4"
-                                Padding="10,6"
-                                Visibility="Collapsed">
-                                <TextBlock
-                                    x:Name="ExperimentalNoticeText"
-                                    Style="{StaticResource StatusTextStyle}"
-                                    Text="Experimental options visible" />
-                            </Border>
-                            <TextBox
-                                x:Name="SearchBox"
-                                Width="240"
-                                PlaceholderText="Search settings"
-                                Style="{StaticResource HomecomingTextBoxStyle}"
-                                TextChanged="SearchBox_TextChanged" />
-                            <Button
-                                x:Name="DiscardButton"
-                                Click="DiscardButton_Click"
-                                Content="Discard"
-                                Style="{StaticResource HomecomingButtonStyle}" />
-                            <Button
-                                x:Name="SaveButton"
-                                Click="SaveButton_Click"
-                                Content="Save"
-                                Style="{StaticResource HomecomingAccentButtonStyle}" />
-                        </StackPanel>
                     </Grid>
                 </Border>
 
                 <Border
                     Grid.Row="2"
+                    Background="{StaticResource HomecomingHeaderBrush}"
+                    BorderBrush="{StaticResource HomecomingSurfaceBorderBrush}"
+                    BorderThickness="0,0,0,1"
+                    Padding="12,7">
+                    <Grid x:Name="HeaderToolsGrid" ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox
+                            x:Name="SearchBox"
+                            Grid.Column="0"
+                            Width="240"
+                            PlaceholderText="Search settings"
+                            Style="{StaticResource HomecomingTextBoxStyle}"
+                            TextChanged="SearchBox_TextChanged" />
+                        <CheckBox
+                            x:Name="AdvancedOptionsToggle"
+                            Grid.Column="1"
+                            Click="AdvancedOptionsToggle_Click"
+                            Content="Advanced options"
+                            Style="{StaticResource HomecomingCheckBoxStyle}"
+                            VerticalAlignment="Center" />
+                        <Button
+                            x:Name="SelectGameBinButton"
+                            Grid.Column="3"
+                            Click="SelectGameBinButton_Click"
+                            Content="Choose game Bin"
+                            Style="{StaticResource HomecomingButtonStyle}" />
+                    </Grid>
+                </Border>
+
+                <Border
+                    Grid.Row="3"
                     Background="{StaticResource HomecomingRailBrush}"
                     BorderBrush="{StaticResource HomecomingSurfaceBorderBrush}"
                     BorderThickness="0,0,0,1"
@@ -165,7 +149,7 @@
 
                 <Border
                     x:Name="DependencyBanner"
-                    Grid.Row="3"
+                    Grid.Row="4"
                     Margin="12,10,12,0"
                     Background="{StaticResource HomecomingSurfaceBrush}"
                     BorderBrush="{StaticResource HomecomingAccentBrush}"
@@ -232,7 +216,7 @@
                     </Grid>
                 </Border>
 
-                <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto">
+                <ScrollViewer Grid.Row="5" VerticalScrollBarVisibility="Auto">
                             <Grid Padding="12">
                                 <Grid
                                     x:Name="CardsGrid"
@@ -285,6 +269,17 @@
                                             </StackPanel>
                                         </Grid>
 
+                                        <Grid x:Name="DisplayResolutionUiRow" Style="{StaticResource SettingRowGridStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="220" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <CheckBox x:Name="EnableHighResolutionUiFixToggle" Click="AnySettingChanged" Content="High-resolution map/item fix" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Scales map, note, and item panels with the active render resolution." />
+                                            </StackPanel>
+                                        </Grid>
+
                                         <Grid x:Name="DisplayRowThree" Style="{StaticResource SettingRowGridStyle}">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
@@ -320,12 +315,22 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
-                                            <StackPanel>
+                                            <StackPanel x:Name="DisplayWidthPanel">
+                                                <TextBlock Style="{StaticResource SettingLabelTextStyle}" Text="Resolution width" />
+                                                <NumberBox x:Name="FallbackWidthBox" Minimum="0" SpinButtonPlacementMode="Compact" ValueChanged="AnyNumberChanged" />
+                                                <TextBlock Style="{StaticResource ValueDescriptionTextStyle}" Text="Fallback width. Use 0 to follow the game or desktop setting." />
+                                            </StackPanel>
+                                            <StackPanel x:Name="DisplayHeightPanel" Grid.Column="1">
+                                                <TextBlock Style="{StaticResource SettingLabelTextStyle}" Text="Resolution height" />
+                                                <NumberBox x:Name="FallbackHeightBox" Minimum="0" SpinButtonPlacementMode="Compact" ValueChanged="AnyNumberChanged" />
+                                                <TextBlock Style="{StaticResource ValueDescriptionTextStyle}" Text="Fallback height. Use 0 to follow the game or desktop setting." />
+                                            </StackPanel>
+                                            <StackPanel x:Name="DisplayHudAspectPanel" Grid.Row="1">
                                                 <TextBlock Style="{StaticResource SettingLabelTextStyle}" Text="HUD aspect ratio" />
                                                 <NumberBox x:Name="HudViewportAspectRatioBox" Minimum="1" SmallChange="0.01" SpinButtonPlacementMode="Compact" ValueChanged="AnyNumberChanged" />
                                                 <TextBlock Style="{StaticResource ValueDescriptionTextStyle}" Text="Sets the aspect ratio used when clamping HUD placement." />
                                             </StackPanel>
-                                            <StackPanel Grid.Column="1">
+                                            <StackPanel x:Name="DisplayFallbackRefreshPanel" Grid.Row="1" Grid.Column="1">
                                                 <TextBlock Style="{StaticResource SettingLabelTextStyle}" Text="Fallback refresh rate" />
                                                 <NumberBox x:Name="FallbackRefreshRateBox" Minimum="0" SpinButtonPlacementMode="Compact" ValueChanged="AnyNumberChanged" />
                                                 <TextBlock Style="{StaticResource ValueDescriptionTextStyle}" Text="Used when the game asks for a bad or unsupported fullscreen refresh." />
@@ -428,17 +433,17 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
-                                            <StackPanel>
+                                            <StackPanel x:Name="TargetFrameRatePanel">
                                                 <TextBlock Style="{StaticResource SettingLabelTextStyle}" Text="Target frame rate" />
                                                 <NumberBox x:Name="TargetFrameRateBox" Minimum="0" SpinButtonPlacementMode="Compact" ValueChanged="AnyNumberChanged" />
                                                 <TextBlock Style="{StaticResource ValueDescriptionTextStyle}" Text="0 leaves the patch effectively uncapped; any other value becomes the target cap." />
                                             </StackPanel>
-                                            <StackPanel Grid.Column="1">
+                                            <StackPanel x:Name="MaximumPresentationIntervalPanel" Grid.Column="1">
                                                 <TextBlock Style="{StaticResource SettingLabelTextStyle}" Text="Max present interval" />
                                                 <NumberBox x:Name="MaximumPresentationIntervalBox" Minimum="0" SpinButtonPlacementMode="Compact" ValueChanged="AnyNumberChanged" />
                                                 <TextBlock Style="{StaticResource ValueDescriptionTextStyle}" Text="Upper limit for the presentation interval the patch allows the game to request." />
                                             </StackPanel>
-                                            <StackPanel Grid.Column="2">
+                                            <StackPanel x:Name="PresentWakeLeadPanel" Grid.Column="2">
                                                 <TextBlock Style="{StaticResource SettingLabelTextStyle}" Text="Wake lead (ms)" />
                                                 <NumberBox x:Name="PresentWakeLeadMillisecondsBox" Minimum="0" SmallChange="0.05" SpinButtonPlacementMode="Compact" ValueChanged="AnyNumberChanged" />
                                                 <TextBlock Style="{StaticResource ValueDescriptionTextStyle}" Text="How early the scheduler wakes before the next intended present deadline." />
@@ -611,6 +616,73 @@
                                 </Grid>
                             </Grid>
                 </ScrollViewer>
+
+                <Border
+                    Grid.Row="6"
+                    Background="{StaticResource HomecomingHeaderBrush}"
+                    BorderBrush="{StaticResource HomecomingSurfaceBorderBrush}"
+                    BorderThickness="0,1,0,0"
+                    Padding="12,8">
+                    <Grid x:Name="FooterGrid" ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel x:Name="FooterStatusPanel" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Border
+                                x:Name="DirtyIndicator"
+                                Background="{StaticResource HomecomingSurfaceInsetBrush}"
+                                BorderBrush="{StaticResource HomecomingSurfaceBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                Padding="10,6">
+                                <TextBlock
+                                    x:Name="DirtyIndicatorText"
+                                    Style="{StaticResource StatusTextStyle}"
+                                    Text="No pending changes" />
+                            </Border>
+                            <Border
+                                x:Name="ExperimentalNotice"
+                                Background="{StaticResource HomecomingSurfaceInsetBrush}"
+                                BorderBrush="{StaticResource HomecomingAccentBrush}"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                Padding="10,6"
+                                Visibility="Collapsed">
+                                <TextBlock
+                                    x:Name="ExperimentalNoticeText"
+                                    Style="{StaticResource StatusTextStyle}"
+                                    Text="Experimental options visible" />
+                            </Border>
+                        </StackPanel>
+                        <StackPanel x:Name="FooterActionsPanel" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                            <CheckBox
+                                x:Name="LaunchThroughSteamCheckBox"
+                                Click="LaunchThroughSteamCheckBox_Click"
+                                Content="Launch through Steam"
+                                Style="{StaticResource HomecomingCheckBoxStyle}"
+                                ToolTipService.ToolTip="Optional. Uses Steam app 19000. Clear this option to launch SilentHill.exe directly."
+                                VerticalAlignment="Center" />
+                            <StackPanel x:Name="FooterButtonsPanel" Orientation="Horizontal" Spacing="6">
+                                <Button
+                                    x:Name="DiscardButton"
+                                    Click="DiscardButton_Click"
+                                    Content="Discard"
+                                    Style="{StaticResource HomecomingButtonStyle}" />
+                                <Button
+                                    x:Name="SaveButton"
+                                    Click="SaveButton_Click"
+                                    Content="Save"
+                                    Style="{StaticResource HomecomingButtonStyle}" />
+                                <Button
+                                    x:Name="RunButton"
+                                    Click="RunButton_Click"
+                                    Content="Run"
+                                    Style="{StaticResource HomecomingAccentButtonStyle}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </Border>
             </Grid>
         </Border>
     </Grid>

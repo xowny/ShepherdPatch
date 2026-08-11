@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using Microsoft.UI.Windowing;
@@ -12,7 +13,9 @@ using ShepherdConfigurator.Configuration;
 using ShepherdConfigurator.Shell;
 using ShepherdConfigurator.Services;
 using Windows.Graphics;
+using Windows.Storage.Pickers;
 using Windows.UI;
+using WinRT.Interop;
 
 namespace ShepherdConfigurator;
 
@@ -24,6 +27,7 @@ public sealed partial class MainWindow : Window
     private readonly List<ValueGridDefinition> _valueGrids;
     private bool _isLoading;
     private bool _isDirty;
+    private bool _showAdvancedOptions;
     private string? _configPath;
     private IniDocument? _loadedDocument;
     private DependencyStatus? _dependencyStatus;
@@ -34,6 +38,8 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        LaunchThroughSteamCheckBox.IsChecked =
+            ConfigFileService.ResolveLaunchThroughSteamPreference();
 
         AppWindow.Title = "ShepherdPatch Configurator";
         AppWindow.Resize(new SizeInt32(1360, 940));
@@ -73,6 +79,7 @@ public sealed partial class MainWindow : Window
         [
             new PairedSettingRow(DisplayRowOne),
             new PairedSettingRow(DisplayRowTwo),
+            new PairedSettingRow(DisplayResolutionUiRow),
             new PairedSettingRow(DisplayRowThree),
             new PairedSettingRow(DisplayRowFour),
             new PairedSettingRow(InputRowOne),
@@ -89,7 +96,7 @@ public sealed partial class MainWindow : Window
 
         _valueGrids =
         [
-            new ValueGridDefinition(DisplayValuesGrid, 3),
+            new ValueGridDefinition(DisplayValuesGrid, 2),
             new ValueGridDefinition(InputValuesGrid, 1),
             new ValueGridDefinition(FrameRateValuesGrid, 3),
             new ValueGridDefinition(AdvancedValuesGrid, 2)
@@ -98,6 +105,7 @@ public sealed partial class MainWindow : Window
         UpdateCategoryButtonStates();
         LoadConfiguration();
         RefreshDependencyBanner();
+        ApplyAdvancedOptionsVisibility();
         UpdateCardVisibility();
         ApplyAdaptiveLayout(AdaptiveLayoutAdvisor.GetMode(AppWindow.Size.Width));
     }
@@ -125,11 +133,14 @@ public sealed partial class MainWindow : Window
             SetToggle(EnableSafeResolutionChangesToggle, document, "EnableSafeResolutionChanges");
             SetToggle(EnableDpiAwarenessToggle, document, "EnableDpiAwareness");
             SetToggle(EnableUltrawideFovFixToggle, document, "EnableUltrawideFovFix");
+            SetToggle(EnableHighResolutionUiFixToggle, document, "EnableHighResolutionUiFix");
             SetToggle(ForceBorderlessToggle, document, "ForceBorderless");
             SetToggle(RetryResetInWindowedModeToggle, document, "RetryResetInWindowedMode");
             SetToggle(EnableHudViewportClampToggle, document, "EnableHudViewportClamp");
             SetToggle(ReduceBorderlessPresentStutterToggle, document, "ReduceBorderlessPresentStutter");
             SetToggle(EnableFlipExSwapEffectToggle, document, "EnableFlipExSwapEffect");
+            SetNumber(FallbackWidthBox, document, "FallbackWidth", 0.0);
+            SetNumber(FallbackHeightBox, document, "FallbackHeight", 0.0);
             SetNumber(HudViewportAspectRatioBox, document, "HudViewportAspectRatio", 16.0 / 9.0);
             SetNumber(FallbackRefreshRateBox, document, "FallbackRefreshRate", 60.0);
 
@@ -179,7 +190,8 @@ public sealed partial class MainWindow : Window
 
     private static void SetNumber(NumberBox numberBox, IniDocument document, string key, double fallback)
     {
-        if (double.TryParse(document.GetValue(key), out double value))
+        if (double.TryParse(document.GetValue(key), NumberStyles.Float,
+                CultureInfo.InvariantCulture, out double value))
         {
             numberBox.Value = value;
             return;
@@ -197,11 +209,14 @@ public sealed partial class MainWindow : Window
         SetValue(document, "EnableSafeResolutionChanges", EnableSafeResolutionChangesToggle.IsChecked == true);
         SetValue(document, "EnableDpiAwareness", EnableDpiAwarenessToggle.IsChecked == true);
         SetValue(document, "EnableUltrawideFovFix", EnableUltrawideFovFixToggle.IsChecked == true);
+        SetValue(document, "EnableHighResolutionUiFix", EnableHighResolutionUiFixToggle.IsChecked == true);
         SetValue(document, "ForceBorderless", ForceBorderlessToggle.IsChecked == true);
         SetValue(document, "RetryResetInWindowedMode", RetryResetInWindowedModeToggle.IsChecked == true);
         SetValue(document, "EnableHudViewportClamp", EnableHudViewportClampToggle.IsChecked == true);
         SetValue(document, "ReduceBorderlessPresentStutter", ReduceBorderlessPresentStutterToggle.IsChecked == true);
         SetValue(document, "EnableFlipExSwapEffect", EnableFlipExSwapEffectToggle.IsChecked == true);
+        SetValue(document, "FallbackWidth", FallbackWidthBox.Value, 0);
+        SetValue(document, "FallbackHeight", FallbackHeightBox.Value, 0);
         SetValue(document, "HudViewportAspectRatio", HudViewportAspectRatioBox.Value);
         SetValue(document, "FallbackRefreshRate", FallbackRefreshRateBox.Value, 0);
 
@@ -243,13 +258,13 @@ public sealed partial class MainWindow : Window
 
     private static void SetValue(IniDocument document, string key, double value)
     {
-        document.SetValue(key, value.ToString("0.###"));
+        document.SetValue(key, value.ToString("0.###", CultureInfo.InvariantCulture));
     }
 
     private static void SetValue(IniDocument document, string key, double value, int decimalPlaces)
     {
         string format = decimalPlaces <= 0 ? "0" : $"0.{new string('#', decimalPlaces)}";
-        document.SetValue(key, value.ToString(format));
+        document.SetValue(key, value.ToString(format, CultureInfo.InvariantCulture));
     }
 
     private void SetDirty(bool value)
@@ -274,6 +289,13 @@ public sealed partial class MainWindow : Window
             query,
             static card => card.Category,
             static card => card.Tokens);
+
+        if (!_showAdvancedOptions)
+        {
+            visibleCards = visibleCards
+                .Where(static card => card.Category is "Display" or "Input" or "Frame Rate")
+                .ToList();
+        }
 
         foreach (CardDefinition card in _cards)
         {
@@ -322,18 +344,173 @@ public sealed partial class MainWindow : Window
         UpdateCardVisibility();
     }
 
-    private void SaveButton_Click(object sender, RoutedEventArgs e)
+    private void AdvancedOptionsToggle_Click(object sender, RoutedEventArgs e)
     {
-        if (_configPath is null)
+        _showAdvancedOptions = AdvancedOptionsToggle.IsChecked == true;
+        if (!_showAdvancedOptions &&
+            _selectedCategory is "Stability" or "Movies" or "Advanced")
+        {
+            _selectedCategory = "All";
+        }
+
+        ApplyAdvancedOptionsVisibility();
+        UpdateCategoryButtonStates();
+        UpdateCardVisibility();
+    }
+
+    private void ApplyAdvancedOptionsVisibility()
+    {
+        Visibility advancedVisibility = _showAdvancedOptions
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        StabilityCategoryButton.Visibility = advancedVisibility;
+        MoviesCategoryButton.Visibility = advancedVisibility;
+        AdvancedCategoryButton.Visibility = advancedVisibility;
+
+        DisplayRowOne.Visibility = advancedVisibility;
+        DisplayRowThree.Visibility = advancedVisibility;
+        DisplayRowFour.Visibility = advancedVisibility;
+        DisplayHudAspectPanel.Visibility = advancedVisibility;
+        DisplayFallbackRefreshPanel.Visibility = advancedVisibility;
+        InputRowTwo.Visibility = advancedVisibility;
+        MaximumPresentationIntervalPanel.Visibility = advancedVisibility;
+        PresentWakeLeadPanel.Visibility = advancedVisibility;
+    }
+
+    private async void SelectGameBinButton_Click(object sender, RoutedEventArgs e)
+    {
+        FolderPicker picker = new();
+        picker.FileTypeFilter.Add("*");
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+
+        Windows.Storage.StorageFolder? folder = await picker.PickSingleFolderAsync();
+        if (folder is null)
         {
             return;
         }
 
+        if (!await ConfirmConfigurationSwitchAsync())
+        {
+            return;
+        }
+
+        if (!ConfigFileService.SetSelectedGameBinDirectory(folder.Path))
+        {
+            ConfigPathText.Text = "Select the Bin folder that contains SilentHill.exe";
+            return;
+        }
+
+        LoadConfiguration();
+        RefreshDependencyBanner();
+    }
+
+    private async System.Threading.Tasks.Task<bool> ConfirmConfigurationSwitchAsync()
+    {
+        if (!_isDirty)
+        {
+            return true;
+        }
+
+        ContentDialog dialog = new()
+        {
+            XamlRoot = ShellBorder.XamlRoot,
+            Title = "Unsaved changes",
+            Content = "Save changes to the current installation before choosing another Bin?",
+            PrimaryButtonText = "Save",
+            SecondaryButtonText = "Discard",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        ContentDialogResult result = await dialog.ShowAsync();
+        return result switch
+        {
+            ContentDialogResult.Primary => SaveConfiguration(),
+            ContentDialogResult.Secondary => true,
+            _ => false
+        };
+    }
+
+    private void SaveButton_Click(object sender, RoutedEventArgs e)
+    {
+        SaveConfiguration();
+    }
+
+    private bool SaveConfiguration()
+    {
+        if (_configPath is null)
+        {
+            return false;
+        }
+
         IniDocument document = BuildDocumentFromControls();
-        ConfigFileService.Save(_configPath, document);
+        try
+        {
+            ConfigFileService.Save(_configPath, document);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            ConfigPathText.Text = "ShepherdPatch.ini could not be saved. Check that the file is writable and try again.";
+            return false;
+        }
+
         _loadedDocument = document;
         SetDirty(false);
         RefreshDependencyBanner();
+        return true;
+    }
+
+    private void RunButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isDirty && !SaveConfiguration())
+        {
+            ConfigPathText.Text = "Select a game Bin before running the game";
+            return;
+        }
+
+        if (_dependencyStatus is null)
+        {
+            RefreshDependencyBanner();
+        }
+
+        if (_dependencyStatus is null)
+        {
+            ConfigPathText.Text = "The game could not be launched from the selected Bin";
+            return;
+        }
+
+        bool launchThroughSteam = LaunchThroughSteamCheckBox.IsChecked == true;
+        GameLaunchPlan? launchPlan = GameLaunchPlanner.Create(
+            _dependencyStatus.InstallDirectory,
+            launchThroughSteam);
+        if (launchPlan is null)
+        {
+            ConfigPathText.Text = launchThroughSteam
+                ? "Steam launch is unavailable for this Bin. Clear 'Launch through Steam' to run SilentHill.exe directly."
+                : "SilentHill.exe was not found in the selected Bin";
+            return;
+        }
+
+        if (!ModDependencyService.LaunchGame(launchPlan))
+        {
+            ConfigPathText.Text = launchThroughSteam
+                ? "Steam could not launch the game"
+                : "SilentHill.exe could not be launched from the selected Bin";
+        }
+    }
+
+    private void LaunchThroughSteamCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        bool requestedValue = LaunchThroughSteamCheckBox.IsChecked == true;
+        if (ConfigFileService.SetLaunchThroughSteamPreference(requestedValue))
+        {
+            return;
+        }
+
+        LaunchThroughSteamCheckBox.IsChecked =
+            ConfigFileService.ResolveLaunchThroughSteamPreference();
+        ConfigPathText.Text = "The Steam launch preference could not be saved";
     }
 
     private void DiscardButton_Click(object sender, RoutedEventArgs e)
@@ -439,9 +616,15 @@ public sealed partial class MainWindow : Window
             : "Required setup items missing";
         DependencyBannerText.Text = string.Join(" ", messageParts) + " Install them before launching the game.";
         DependencyPathText.Text = hasMissingModFiles
-            ? $"Target install: {_dependencyStatus.InstallDirectory}"
+            ? string.IsNullOrWhiteSpace(_dependencyStatus.InstallDirectory)
+                ? "No game Bin selected"
+                : $"Target install: {_dependencyStatus.InstallDirectory}"
             : "This build needs extra Windows runtime components before it can run normally.";
-        OpenDependencyInstallFolderButton.Visibility = hasMissingModFiles ? Visibility.Visible : Visibility.Collapsed;
+        OpenDependencyInstallFolderButton.Visibility = hasMissingModFiles &&
+            !string.IsNullOrWhiteSpace(_dependencyStatus.InstallDirectory) &&
+            Directory.Exists(_dependencyStatus.InstallDirectory)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         OpenBundledDependenciesButton.Visibility = hasMissingModFiles && !string.IsNullOrWhiteSpace(_dependencyStatus.BundledSourceDirectory)
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -490,10 +673,11 @@ public sealed partial class MainWindow : Window
         _layoutMode = mode;
 
         bool compact = mode == AdaptiveLayoutMode.Compact;
-        ShellBorder.Margin = compact ? new Thickness(10) : new Thickness(18);
-        SearchBox.Width = compact ? double.NaN : mode == AdaptiveLayoutMode.Wide ? 320 : 280;
-        HeaderCommandBar.Orientation = compact ? Orientation.Vertical : Orientation.Horizontal;
-        HeaderCommandBar.HorizontalAlignment = compact ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
+        ShellBorder.Margin = compact
+            ? new Thickness(6)
+            : mode == AdaptiveLayoutMode.Wide ? new Thickness(14) : new Thickness(10);
+        SearchBox.Width = compact ? 180 : mode == AdaptiveLayoutMode.Wide ? 320 : 240;
+        ConfigPathText.Width = compact ? 180 : 300;
 
         foreach (PairedSettingRow row in _pairedSettingRows)
         {
@@ -505,7 +689,40 @@ public sealed partial class MainWindow : Window
             ApplyValueGridLayout(valueGrid, compact);
         }
 
+        ApplyFooterLayout(compact);
         ApplyCardGridLayout(mode);
+    }
+
+    private void ApplyFooterLayout(bool compact)
+    {
+        FooterGrid.ColumnDefinitions.Clear();
+        FooterGrid.RowDefinitions.Clear();
+
+        FooterGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        FooterGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        Grid.SetColumn(FooterStatusPanel, 0);
+        Grid.SetRow(FooterStatusPanel, 0);
+
+        if (compact)
+        {
+            FooterGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetColumn(FooterActionsPanel, 0);
+            Grid.SetRow(FooterActionsPanel, 1);
+            FooterActionsPanel.Orientation = Orientation.Vertical;
+            FooterActionsPanel.HorizontalAlignment = HorizontalAlignment.Stretch;
+            FooterActionsPanel.Margin = new Thickness(0, 8, 0, 0);
+            FooterButtonsPanel.HorizontalAlignment = HorizontalAlignment.Right;
+            return;
+        }
+
+        FooterGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(FooterActionsPanel, 1);
+        Grid.SetRow(FooterActionsPanel, 0);
+        FooterActionsPanel.Orientation = Orientation.Horizontal;
+        FooterActionsPanel.HorizontalAlignment = HorizontalAlignment.Right;
+        FooterActionsPanel.Margin = default;
+        FooterButtonsPanel.HorizontalAlignment = HorizontalAlignment.Right;
     }
 
     private static void ApplyPairedRowLayout(Grid grid, bool compact)
@@ -576,20 +793,26 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        for (int i = 0; i < definition.DefaultColumnCount; i++)
+        int columnCount = Math.Max(1, definition.DefaultColumnCount);
+        for (int i = 0; i < columnCount; i++)
         {
             definition.Grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         }
 
-        definition.Grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        int rowCount = AdaptiveLayoutAdvisor.GetGridRowCount(children.Count, columnCount);
+        for (int i = 0; i < rowCount; i++)
+        {
+            definition.Grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        }
 
         for (int i = 0; i < children.Count; i++)
         {
             FrameworkElement element = (FrameworkElement)children[i];
-            Grid.SetColumn(element, i);
-            Grid.SetRow(element, 0);
+            AdaptiveLayoutAdvisor.GridPosition position = AdaptiveLayoutAdvisor.GetGridPosition(i, columnCount);
+            Grid.SetColumn(element, position.Column);
+            Grid.SetRow(element, position.Row);
 
-            element.Margin = default;
+            element.Margin = position.Row == rowCount - 1 ? default : new Thickness(0, 0, 0, 12);
         }
     }
 
@@ -673,7 +896,9 @@ public sealed partial class MainWindow : Window
             isDirty: _isDirty,
             visibleExperimentalCount: experimentalCount);
 
-        ExperimentalNotice.Visibility = experimentalCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+        // The context summary already includes the experimental-option count.
+        // Keeping a second status pill in the command row wastes scarce width.
+        ExperimentalNotice.Visibility = Visibility.Collapsed;
         ExperimentalNoticeText.Text = experimentalCount == 1
             ? "1 experimental option visible"
             : $"{experimentalCount} experimental options visible";
