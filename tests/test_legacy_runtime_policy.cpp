@@ -74,6 +74,15 @@ TEST_CASE(BuildLegacyWaitableTimerWorkerPlanKeepsOriginalSleepWithoutTrackedTime
     CHECK_EQ(plan.adjustedSleepMs, 1u);
 }
 
+TEST_CASE(BuildLegacyWaitableTimerWorkerPlanPreservesNonTrivialRequestedSleep)
+{
+    const shh::LegacyWaitableTimerWorkerPlan plan =
+        shh::BuildLegacyWaitableTimerWorkerPlan(true, 25, true, true);
+
+    CHECK_TRUE(!plan.useTrackedTimer);
+    CHECK_EQ(plan.adjustedSleepMs, 25u);
+}
+
 TEST_CASE(BuildLegacyThreadControlPlanLeavesOrdinaryCallsAlone)
 {
     const shh::LegacyThreadControlPlan plan =

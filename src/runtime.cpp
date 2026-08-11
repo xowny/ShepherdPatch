@@ -221,6 +221,7 @@ Config g_config{};
 std::filesystem::path g_moduleDirectory;
 std::mutex g_hookMutex;
 std::mutex g_logMutex;
+std::ofstream g_logStream;
 
 struct CadenceTracker
 {
@@ -2010,11 +2011,9 @@ void Log(std::string_view message)
                   static_cast<unsigned long>(GetCurrentThreadId()));
 
     std::scoped_lock lock(g_logMutex);
-    std::ofstream stream(g_moduleDirectory / "ShepherdPatch.log",
-                         std::ios::binary | std::ios::app);
-    if (stream.is_open())
+    if (g_logStream.is_open())
     {
-        stream << prefix << message << "\r\n";
+        g_logStream << prefix << message << "\r\n";
     }
 }
 
@@ -2027,8 +2026,8 @@ void InitializeLog()
 
     {
         std::scoped_lock lock(g_logMutex);
-        std::ofstream stream(g_moduleDirectory / "ShepherdPatch.log",
-                             std::ios::binary | std::ios::trunc);
+        g_logStream.open(g_moduleDirectory / "ShepherdPatch.log",
+                         std::ios::binary | std::ios::trunc);
     }
 
     Log("ShepherdPatch runtime initialization started.");
@@ -2985,13 +2984,16 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
     }
 
     D3DPRESENT_PARAMETERS workingParams = {};
+    D3DPRESENT_PARAMETERS retryParams = {};
     D3DPRESENT_PARAMETERS* paramsForCall = presentationParameters;
     const auto caller = reinterpret_cast<std::uintptr_t>(_ReturnAddress());
     if (presentationParameters != nullptr && g_config.enableSafeResolutionChanges)
     {
         workingParams = *presentationParameters;
         const HWND targetWindow =
-            workingParams.hDeviceWindow != nullptr ? workingParams.hDeviceWindow : focusWindow;
+            paramsForCall != nullptr && paramsForCall->hDeviceWindow != nullptr
+                ? paramsForCall->hDeviceWindow
+                : focusWindow;
         FillMissingBorderlessDimensions(targetWindow, workingParams);
         const PresentParams original = ToPresentParams(workingParams);
         const PresentParams sanitized = SanitizeForReset(original, g_config);
@@ -3018,7 +3020,7 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
     if (FAILED(hr) && presentationParameters != nullptr && g_config.enableSafeResolutionChanges &&
         g_config.retryResetInWindowedMode)
     {
-        D3DPRESENT_PARAMETERS retryParams = *presentationParameters;
+        retryParams = *presentationParameters;
         const PresentParams retry =
             BuildRetryResetParams(ToPresentParams(retryParams), g_config);
         ApplyPresentParams(retry, retryParams);
@@ -3026,11 +3028,18 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
         hr = g_originalCreateDevice(direct3d, adapter, deviceType, focusWindow, behaviorFlags,
                                     &retryParams, returnedDevice);
         Log("CreateDevice retry attempted, result=" + FormatHr(hr));
+        if (SUCCEEDED(hr))
+        {
+            paramsForCall = &retryParams;
+        }
     }
 
     if (SUCCEEDED(hr) && returnedDevice != nullptr && *returnedDevice != nullptr)
     {
-        UpdateBackbufferDimensions(ToPresentParams(workingParams));
+        if (paramsForCall != nullptr)
+        {
+            UpdateBackbufferDimensions(ToPresentParams(*paramsForCall));
+        }
         g_lastDeviceAddress = reinterpret_cast<std::uintptr_t>(*returnedDevice);
         {
             std::ostringstream message;
@@ -3091,7 +3100,9 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
         InstallDeviceExHooks(*returnedDevice);
 
         const HWND targetWindow =
-            workingParams.hDeviceWindow != nullptr ? workingParams.hDeviceWindow : focusWindow;
+            paramsForCall != nullptr && paramsForCall->hDeviceWindow != nullptr
+                ? paramsForCall->hDeviceWindow
+                : focusWindow;
         EnsureGameWindowHook(targetWindow);
         ApplyBorderlessWindow(targetWindow);
     }
@@ -3112,6 +3123,7 @@ HRESULT STDMETHODCALLTYPE HookedCreateDeviceEx(IDirect3D9Ex* direct3d, UINT adap
     }
 
     D3DPRESENT_PARAMETERS workingParams = {};
+    D3DPRESENT_PARAMETERS retryParams = {};
     D3DPRESENT_PARAMETERS* paramsForCall = presentationParameters;
     const auto caller = reinterpret_cast<std::uintptr_t>(_ReturnAddress());
     if (presentationParameters != nullptr && g_config.enableSafeResolutionChanges)
@@ -3146,7 +3158,7 @@ HRESULT STDMETHODCALLTYPE HookedCreateDeviceEx(IDirect3D9Ex* direct3d, UINT adap
     if (FAILED(hr) && presentationParameters != nullptr && g_config.enableSafeResolutionChanges &&
         g_config.retryResetInWindowedMode)
     {
-        D3DPRESENT_PARAMETERS retryParams = *presentationParameters;
+        retryParams = *presentationParameters;
         const PresentParams retry =
             BuildRetryResetParams(ToPresentParams(retryParams), g_config, true);
         ApplyPresentParams(retry, retryParams);
@@ -3154,11 +3166,18 @@ HRESULT STDMETHODCALLTYPE HookedCreateDeviceEx(IDirect3D9Ex* direct3d, UINT adap
         hr = g_originalCreateDeviceEx(direct3d, adapter, deviceType, focusWindow, behaviorFlags,
                                       &retryParams, nullptr, returnedDevice);
         Log("CreateDeviceEx retry attempted, result=" + FormatHr(hr));
+        if (SUCCEEDED(hr))
+        {
+            paramsForCall = &retryParams;
+        }
     }
 
     if (SUCCEEDED(hr) && returnedDevice != nullptr && *returnedDevice != nullptr)
     {
-        UpdateBackbufferDimensions(ToPresentParams(workingParams));
+        if (paramsForCall != nullptr)
+        {
+            UpdateBackbufferDimensions(ToPresentParams(*paramsForCall));
+        }
         g_lastDeviceAddress = reinterpret_cast<std::uintptr_t>(*returnedDevice);
         {
             std::ostringstream message;
@@ -3219,7 +3238,9 @@ HRESULT STDMETHODCALLTYPE HookedCreateDeviceEx(IDirect3D9Ex* direct3d, UINT adap
         InstallDeviceExHooks(*returnedDevice);
 
         const HWND targetWindow =
-            workingParams.hDeviceWindow != nullptr ? workingParams.hDeviceWindow : focusWindow;
+            paramsForCall != nullptr && paramsForCall->hDeviceWindow != nullptr
+                ? paramsForCall->hDeviceWindow
+                : focusWindow;
         EnsureGameWindowHook(targetWindow);
         ApplyBorderlessWindow(targetWindow);
     }
@@ -5054,11 +5075,45 @@ bool ApplyHighResolutionUiFix(HMODULE engineModule)
         return false;
     }
 
+    constexpr std::size_t kPanelInstructionSpan =
+        (kUiPanelExtentInstructionRva + 6) - kUiPanelScaleInstructionRva;
     DWORD functionProtection = 0;
+    DWORD callProtection = 0;
+    DWORD panelProtection = 0;
+    DWORD itemProtection = 0;
+    DWORD ignored = 0;
+
+    // Acquire every writable region before the first mutation. This prevents a
+    // failed protection change from leaving a mixture of stock and patched UI code.
     if (VirtualProtect(dimensionsFunction, 0x2C, PAGE_EXECUTE_READWRITE,
                        &functionProtection) == FALSE)
     {
         Log("High-resolution UI fix skipped: dimensions routine was not writable.");
+        return false;
+    }
+    if (VirtualProtect(baseCanvasCall, kRelativeJumpLength, PAGE_EXECUTE_READWRITE,
+                       &callProtection) == FALSE)
+    {
+        VirtualProtect(dimensionsFunction, 0x2C, functionProtection, &ignored);
+        Log("High-resolution UI fix skipped: base-canvas call was not writable.");
+        return false;
+    }
+    if (VirtualProtect(panelScaleInstruction, kPanelInstructionSpan,
+                       PAGE_EXECUTE_READWRITE, &panelProtection) == FALSE)
+    {
+        VirtualProtect(baseCanvasCall, kRelativeJumpLength, callProtection, &ignored);
+        VirtualProtect(dimensionsFunction, 0x2C, functionProtection, &ignored);
+        Log("High-resolution UI fix skipped: panel constants were not writable.");
+        return false;
+    }
+    if (VirtualProtect(itemScaleInstruction, 8, PAGE_EXECUTE_READWRITE,
+                       &itemProtection) == FALSE)
+    {
+        VirtualProtect(panelScaleInstruction, kPanelInstructionSpan,
+                       panelProtection, &ignored);
+        VirtualProtect(baseCanvasCall, kRelativeJumpLength, callProtection, &ignored);
+        VirtualProtect(dimensionsFunction, 0x2C, functionProtection, &ignored);
+        Log("High-resolution UI fix skipped: item scale was not writable.");
         return false;
     }
 
@@ -5075,33 +5130,9 @@ bool ApplyHighResolutionUiFix(HMODULE engineModule)
     std::memcpy(reinterpret_cast<void*>(moduleBase + kUiDimensionsHeightOperand2Rva),
                 &actualHeight, sizeof(actualHeight));
 
-    DWORD ignored = 0;
-    VirtualProtect(dimensionsFunction, 0x2C, functionProtection, &ignored);
-    FlushInstructionCache(GetCurrentProcess(), dimensionsFunction, 0x2C);
-
-    DWORD callProtection = 0;
-    if (VirtualProtect(baseCanvasCall, kRelativeJumpLength, PAGE_EXECUTE_READWRITE,
-                       &callProtection) == FALSE)
-    {
-        Log("High-resolution UI fix partially applied: base-canvas call was not writable.");
-        return false;
-    }
-
     const auto replacementDisplacement = static_cast<std::int32_t>(replacementDelta);
     std::memcpy(baseCanvasCall + 1, &replacementDisplacement,
                 sizeof(replacementDisplacement));
-    VirtualProtect(baseCanvasCall, kRelativeJumpLength, callProtection, &ignored);
-    FlushInstructionCache(GetCurrentProcess(), baseCanvasCall, kRelativeJumpLength);
-
-    DWORD panelProtection = 0;
-    constexpr std::size_t kPanelInstructionSpan =
-        (kUiPanelExtentInstructionRva + 6) - kUiPanelScaleInstructionRva;
-    if (VirtualProtect(panelScaleInstruction, kPanelInstructionSpan,
-                       PAGE_EXECUTE_READWRITE, &panelProtection) == FALSE)
-    {
-        Log("High-resolution UI fix partially applied: panel constants were not writable.");
-        return false;
-    }
 
     const auto panelScaleAddress = static_cast<std::uint32_t>(constantAddresses[0]);
     const auto panelOffsetAddress = static_cast<std::uint32_t>(constantAddresses[1]);
@@ -5112,23 +5143,20 @@ bool ApplyHighResolutionUiFix(HMODULE engineModule)
                 &panelOffsetAddress, sizeof(panelOffsetAddress));
     std::memcpy(panelExtentInstruction + kAbsoluteFloatOperandOffset,
                 &panelExtentAddress, sizeof(panelExtentAddress));
-    VirtualProtect(panelScaleInstruction, kPanelInstructionSpan,
-                   panelProtection, &ignored);
-    FlushInstructionCache(GetCurrentProcess(), panelScaleInstruction,
-                          kPanelInstructionSpan);
-
-    DWORD itemProtection = 0;
-    if (VirtualProtect(itemScaleInstruction, 8, PAGE_EXECUTE_READWRITE,
-                       &itemProtection) == FALSE)
-    {
-        Log("High-resolution UI fix partially applied: item scale was not writable.");
-        return false;
-    }
-
     const auto itemScaleAddress = static_cast<std::uint32_t>(constantAddresses[3]);
     std::memcpy(itemScaleInstruction + kAbsoluteDoubleOperandOffset,
                 &itemScaleAddress, sizeof(itemScaleAddress));
+
+    VirtualProtect(dimensionsFunction, 0x2C, functionProtection, &ignored);
+    VirtualProtect(baseCanvasCall, kRelativeJumpLength, callProtection, &ignored);
+    VirtualProtect(panelScaleInstruction, kPanelInstructionSpan,
+                   panelProtection, &ignored);
     VirtualProtect(itemScaleInstruction, 8, itemProtection, &ignored);
+
+    FlushInstructionCache(GetCurrentProcess(), dimensionsFunction, 0x2C);
+    FlushInstructionCache(GetCurrentProcess(), baseCanvasCall, kRelativeJumpLength);
+    FlushInstructionCache(GetCurrentProcess(), panelScaleInstruction,
+                          kPanelInstructionSpan);
     FlushInstructionCache(GetCurrentProcess(), itemScaleInstruction, 8);
 
     Log("High-resolution UI fix applied: active render dimensions and resolution-specific "
