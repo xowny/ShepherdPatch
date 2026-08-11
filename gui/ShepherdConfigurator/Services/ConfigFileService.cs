@@ -25,8 +25,7 @@ public static class ConfigFileService
         string? selectedGameBin = ResolveSelectedGameBinDirectory();
         if (selectedGameBin is not null)
         {
-            string selectedConfigPath = Path.Combine(selectedGameBin, "ShepherdPatch.ini");
-            return File.Exists(selectedConfigPath) ? selectedConfigPath : null;
+            return Path.Combine(selectedGameBin, "ShepherdPatch.ini");
         }
 
         string baseDirectory = AppContext.BaseDirectory;
@@ -144,13 +143,33 @@ public static class ConfigFileService
         return ModDependencyAnalyzer.IsGameBinDirectory(path);
     }
 
-    public static IniDocument Load(string path)
+    public static IniFileLoadStatus Load(string path, out IniDocument document)
     {
-        return IniDocument.Parse(File.ReadAllText(path));
+        return IniFileStore.Load(path, out document);
+    }
+
+    public static IniDocument LoadDefaults()
+    {
+        try
+        {
+            using Stream? stream = typeof(ConfigFileService).Assembly.GetManifestResourceStream(
+                "ShepherdConfigurator.Defaults.ShepherdPatch.ini");
+            if (stream is null)
+            {
+                return IniDocument.Parse(string.Empty);
+            }
+
+            using StreamReader reader = new(stream);
+            return IniDocument.Parse(reader.ReadToEnd());
+        }
+        catch (IOException)
+        {
+            return IniDocument.Parse(string.Empty);
+        }
     }
 
     public static void Save(string path, IniDocument document)
     {
-        File.WriteAllText(path, document.Serialize());
+        IniFileStore.Save(path, document);
     }
 }

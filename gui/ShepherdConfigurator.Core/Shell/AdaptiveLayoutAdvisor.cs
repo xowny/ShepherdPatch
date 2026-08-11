@@ -13,6 +13,13 @@ public static class AdaptiveLayoutAdvisor
 {
     public readonly record struct GridPosition(int Row, int Column);
 
+    public static double GetEffectiveWidth(double physicalWidth, double rasterScale)
+    {
+        return rasterScale > 0 && double.IsFinite(rasterScale)
+            ? physicalWidth / rasterScale
+            : physicalWidth;
+    }
+
     public static AdaptiveLayoutMode GetMode(double width)
     {
         // WindowSizeChanged reports effective (DPI-scaled) pixels. Keep the
