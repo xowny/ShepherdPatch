@@ -255,6 +255,8 @@ Direct3DCreate9ExFn g_originalDirect3DCreate9Ex = nullptr;
 LoadLibraryAFn g_originalLoadLibraryA = nullptr;
 std::atomic<bool> g_engineDirect3DCreateHookInstalled = false;
 std::atomic<bool> g_executableLoadLibraryHookInstalled = false;
+std::atomic<bool> g_runtimeConfigurationPublished = false;
+std::atomic<bool> g_runtimeInitializationFailed = false;
 CreateDeviceFn g_originalCreateDevice = nullptr;
 CreateDeviceExFn g_originalCreateDeviceEx = nullptr;
 TestCooperativeLevelFn g_originalTestCooperativeLevel = nullptr;
@@ -2790,6 +2792,7 @@ HRESULT STDMETHODCALLTYPE HookedSetTransform(IDirect3DDevice9* device,
                                              const D3DMATRIX* matrix);
 HRESULT STDMETHODCALLTYPE HookedSetViewport(IDirect3DDevice9* device,
                                             CONST D3DVIEWPORT9* viewport);
+bool WaitForPublishedRuntimeConfiguration();
 IDirect3D9* WINAPI HookedDirect3DCreate9(UINT sdkVersion);
 HRESULT WINAPI HookedDirect3DCreate9Ex(UINT sdkVersion, IDirect3D9Ex** returnedInterface);
 HMODULE WINAPI HookedLoadLibraryA(LPCSTR fileName);
@@ -2989,6 +2992,10 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
         return E_FAIL;
     }
 
+    // Configuration publication occurs before the worker loads any additional
+    // modules. Keep this wait out of the LoadLibraryA callback and loader path.
+    WaitForPublishedRuntimeConfiguration();
+
     D3DPRESENT_PARAMETERS workingParams = {};
     D3DPRESENT_PARAMETERS retryParams = {};
     D3DPRESENT_PARAMETERS* paramsForCall = presentationParameters;
@@ -3130,6 +3137,8 @@ HRESULT STDMETHODCALLTYPE HookedCreateDeviceEx(IDirect3D9Ex* direct3d, UINT adap
     {
         return E_FAIL;
     }
+
+    WaitForPublishedRuntimeConfiguration();
 
     D3DPRESENT_PARAMETERS workingParams = {};
     D3DPRESENT_PARAMETERS retryParams = {};
@@ -3357,6 +3366,21 @@ bool InstallExecutableLoadLibraryHook(HMODULE executableModule)
     return true;
 }
 
+bool WaitForPublishedRuntimeConfiguration()
+{
+    while (!g_runtimeConfigurationPublished.load(std::memory_order_acquire))
+    {
+        if (g_runtimeInitializationFailed.load(std::memory_order_acquire))
+        {
+            return false;
+        }
+
+        Sleep(0);
+    }
+
+    return true;
+}
+
 HMODULE WINAPI HookedLoadLibraryA(LPCSTR fileName)
 {
     if (g_originalLoadLibraryA == nullptr)
@@ -3380,6 +3404,8 @@ HMODULE WINAPI HookedLoadLibraryA(LPCSTR fileName)
 
     if (_stricmp(baseName, "g_SilentHill.sgl") == 0)
     {
+        // Do not wait for configuration from this loader callback. The device
+        // hooks acquire the published configuration before their first read.
         InstallEngineDirect3DCreateHook(loadedModule);
     }
 
@@ -6189,6 +6215,9 @@ DWORD WINAPI InitializeThread(void*)
     g_moduleDirectory = ResolveModuleDirectory(g_module);
     InitializeLog();
     g_config = LoadConfigFromDisk();
+    // No code writes g_config after this release store. Early hook callbacks
+    // acquire this state before they expose the Direct3D device hooks.
+    g_runtimeConfigurationPublished.store(true, std::memory_order_release);
     LogPatchConfigSnapshot();
     LogEngineConfigSnapshot();
     ApplyConfiguredEngineVarsOverrides();
@@ -6246,6 +6275,10 @@ BOOL CALLBACK StartRuntimeInitialization(PINIT_ONCE, PVOID parameter, PVOID*)
     if (thread != nullptr)
     {
         CloseHandle(thread);
+    }
+    else
+    {
+        g_runtimeInitializationFailed.store(true, std::memory_order_release);
     }
 
     return TRUE;
