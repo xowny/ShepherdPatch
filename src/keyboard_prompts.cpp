@@ -327,11 +327,13 @@ std::string ReplaceKeyboardPromptTokens(
 
         const std::string_view token = text.substr(opening + 1, closing - opening - 1);
         const auto replacement = ResolveToken(bindings, token);
-        if (replacement == "LMB" || replacement == "RMB")
+        if (replacement == "LMB")
         {
-            // The game ships proper left/right mouse artwork. Preserve the
-            // token so its renderer can draw that artwork.
-            output.append(text.substr(opening, closing - opening + 1));
+            output += "<COMMAND_MOUSE_LEFT_CLICK>";
+        }
+        else if (replacement == "RMB")
+        {
+            output += "<COMMAND_MOUSE_RIGHT_CLICK>";
         }
         else if (replacement)
         {

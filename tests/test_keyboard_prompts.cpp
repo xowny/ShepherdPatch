@@ -67,7 +67,8 @@ TEST_CASE(ReplaceKeyboardPromptTokensUsesAliasesAndKeepsMarkup)
         "<COLOR,1,2,3>Press <ACTION> or <HEAVY_ATTACK>.<CLEARCOLOR>", bindings);
 
     CHECK_EQ(result,
-             std::string("<COLOR,1,2,3>Press <ACTION> or <HEAVY_ATTACK>.<CLEARCOLOR>"));
+             std::string("<COLOR,1,2,3>Press <COMMAND_MOUSE_LEFT_CLICK> or "
+                         "<COMMAND_MOUSE_RIGHT_CLICK>.<CLEARCOLOR>"));
 }
 
 TEST_CASE(ReplaceKeyboardPromptTokensMapsDefenseToCurrentDodgeBinding)
@@ -126,9 +127,11 @@ TEST_CASE(AllShippingInputTokensHaveKeyboardOrMouseLabels)
         "<COMMAND_CAMERA>";
     const std::string result = shh::ReplaceKeyboardPromptTokens(source, bindings);
 
-    CHECK_TRUE(result.find("<ACTION>") != std::string::npos);
-    CHECK_TRUE(result.find("<FIRE>") != std::string::npos);
-    CHECK_TRUE(result.find("<COMMAND_KICK>") != std::string::npos);
+    CHECK_TRUE(result.find("<ACTION>") == std::string::npos);
+    CHECK_TRUE(result.find("<FIRE>") == std::string::npos);
+    CHECK_TRUE(result.find("<COMMAND_KICK>") == std::string::npos);
+    CHECK_TRUE(result.find("<COMMAND_MOUSE_LEFT_CLICK>") != std::string::npos);
+    CHECK_TRUE(result.find("<COMMAND_MOUSE_RIGHT_CLICK>") != std::string::npos);
     CHECK_TRUE(result.find("<COMMAND_UI_X>") == std::string::npos);
     CHECK_TRUE(result.find("<INVENTORY_WHEEL>") == std::string::npos);
     CHECK_TRUE(result.find("[WASD]") != std::string::npos);
