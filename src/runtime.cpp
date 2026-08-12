@@ -2471,6 +2471,22 @@ void SynchronizeLiveKeyboardBindings(void* manager)
     {
         return;
     }
+    if (current != g_liveKeyboardScanCodes)
+    {
+        std::ostringstream message;
+        message << "Live keyboard scan codes:";
+        for (std::uint8_t commandId = 4; commandId <= 10; ++commandId)
+        {
+            if (const auto match = current.find(commandId); match != current.end())
+            {
+                message << ' ' << static_cast<unsigned int>(commandId) << "=0x"
+                        << std::hex << std::uppercase << std::setw(2)
+                        << std::setfill('0') << static_cast<unsigned int>(match->second)
+                        << std::dec;
+            }
+        }
+        Log(message.str());
+    }
     g_liveKeyboardScanCodes = std::move(current);
     UpdateLoadedKeyboardPromptStringsLocked(g_liveKeyboardScanCodes);
 }
@@ -2627,12 +2643,21 @@ const char* __fastcall HookedPromptResourceResolver(void* manager, void* /*reser
     const auto resourceText = TryReadPromptResourceText(resource);
     if (g_originalPromptResourceResolver != nullptr)
     {
-        resolvedCommandId = ResolvePcPromptCommand(
-            commandId, resourceText ? std::string_view(*resourceText) : std::string_view{});
-        if (resolvedCommandId != commandId)
+        if (const std::string_view overrideResource =
+                ResolvePcPromptResourceOverride(commandId);
+            !overrideResource.empty())
         {
-            resource =
-                g_originalPromptResourceResolver(manager, resolvedCommandId, alternateIcon);
+            resource = overrideResource.data();
+        }
+        else
+        {
+            resolvedCommandId = ResolvePcPromptCommand(
+                commandId, resourceText ? std::string_view(*resourceText) : std::string_view{});
+            if (resolvedCommandId != commandId)
+            {
+                resource =
+                    g_originalPromptResourceResolver(manager, resolvedCommandId, alternateIcon);
+            }
         }
     }
 

@@ -16,8 +16,13 @@ TEST_CASE(GenericPcActionResourcesAreDetectedWithoutMatchingValidDeviceIcons)
 
 TEST_CASE(MissingPcNavigationResourcesUseTheirMouseBindings)
 {
-    CHECK_EQ(shh::ResolvePcPromptCommand(19, ""), 5u);
-    CHECK_EQ(shh::ResolvePcPromptCommand(20, ""), 4u);
+    CHECK_EQ(shh::ResolvePcPromptResourceOverride(19),
+             std::string_view("shv_buttonpcmouseleft_32"));
+    CHECK_EQ(shh::ResolvePcPromptResourceOverride(20),
+             std::string_view("shv_buttonpcmouseright_32"));
+    CHECK_TRUE(shh::ResolvePcPromptResourceOverride(54).empty());
+    CHECK_EQ(shh::ResolvePcPromptCommand(19, ""), 19u);
+    CHECK_EQ(shh::ResolvePcPromptCommand(20, ""), 20u);
     CHECK_EQ(shh::ResolvePcPromptCommand(54, ""), 54u);
 }
 
@@ -62,7 +67,7 @@ TEST_CASE(ReplaceKeyboardPromptTokensUsesAliasesAndKeepsMarkup)
         "<COLOR,1,2,3>Press <ACTION> or <HEAVY_ATTACK>.<CLEARCOLOR>", bindings);
 
     CHECK_EQ(result,
-             std::string("<COLOR,1,2,3>Press [LMB] or [RMB].<CLEARCOLOR>"));
+             std::string("<COLOR,1,2,3>Press <ACTION> or <HEAVY_ATTACK>.<CLEARCOLOR>"));
 }
 
 TEST_CASE(ReplaceKeyboardPromptTokensMapsDefenseToCurrentDodgeBinding)
@@ -121,12 +126,11 @@ TEST_CASE(AllShippingInputTokensHaveKeyboardOrMouseLabels)
         "<COMMAND_CAMERA>";
     const std::string result = shh::ReplaceKeyboardPromptTokens(source, bindings);
 
-    CHECK_TRUE(result.find("<ACTION>") == std::string::npos);
-    CHECK_TRUE(result.find("<FIRE>") == std::string::npos);
-    CHECK_TRUE(result.find("<COMMAND_") == std::string::npos);
+    CHECK_TRUE(result.find("<ACTION>") != std::string::npos);
+    CHECK_TRUE(result.find("<FIRE>") != std::string::npos);
+    CHECK_TRUE(result.find("<COMMAND_KICK>") != std::string::npos);
+    CHECK_TRUE(result.find("<COMMAND_UI_X>") == std::string::npos);
     CHECK_TRUE(result.find("<INVENTORY_WHEEL>") == std::string::npos);
-    CHECK_TRUE(result.find("[LMB]") != std::string::npos);
-    CHECK_TRUE(result.find("[RMB]") != std::string::npos);
     CHECK_TRUE(result.find("[WASD]") != std::string::npos);
     CHECK_TRUE(result.find("[Mouse]") != std::string::npos);
 }

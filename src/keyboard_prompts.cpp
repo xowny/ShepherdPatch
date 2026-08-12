@@ -327,7 +327,13 @@ std::string ReplaceKeyboardPromptTokens(
 
         const std::string_view token = text.substr(opening + 1, closing - opening - 1);
         const auto replacement = ResolveToken(bindings, token);
-        if (replacement)
+        if (replacement == "LMB" || replacement == "RMB")
+        {
+            // The game ships proper left/right mouse artwork. Preserve the
+            // token so its renderer can draw that artwork.
+            output.append(text.substr(opening, closing - opening + 1));
+        }
+        else if (replacement)
         {
             output += '[';
             output += *replacement;
@@ -355,19 +361,21 @@ bool IsGenericPcActionResource(std::string_view resourceName)
     return name == "SHV_BUTTONACTIONPC" || name == "PC_DODGEFLASH";
 }
 
+std::string_view ResolvePcPromptResourceOverride(std::uint32_t commandId)
+{
+    if (commandId == 19)
+        return "shv_buttonpcmouseleft_32";
+    if (commandId == 20)
+        return "shv_buttonpcmouseright_32";
+    return {};
+}
+
 std::uint32_t ResolvePcPromptCommand(std::uint32_t commandId,
                                      std::string_view resourceName)
 {
-    // The PC renderer has no resources for these two mouse-backed navigation
-    // commands. Reuse the resources for the equivalent gameplay bindings.
     constexpr std::uint32_t kMouseLeftCommand = 5;
-    constexpr std::uint32_t kMouseRightCommand = 4;
     if (resourceName.empty())
     {
-        if (commandId == 19)
-            return kMouseLeftCommand;
-        if (commandId == 20)
-            return kMouseRightCommand;
         return commandId;
     }
 
