@@ -2205,9 +2205,10 @@ void CaptureKeyboardPromptStrings(std::string_view source)
             const std::string_view value = line.substr(closingBracket + 1);
             const std::string transformed =
                 ReplaceKeyboardPromptTokens(value, g_keyboardPromptBaseBindings);
-            if (transformed != value && value.size() <= std::numeric_limits<char16_t>::max())
+            if (transformed != value &&
+                transformed.size() <= std::numeric_limits<char16_t>::max())
             {
-                std::u16string wideValue = PromptTextToUtf16(value);
+                std::u16string wideValue = PromptTextToUtf16(transformed);
                 if (!wideValue.empty())
                 {
                     g_liveKeyboardPromptStrings.push_back(
@@ -2502,12 +2503,38 @@ void PollLiveKeyboardBindings()
     SynchronizeLiveKeyboardBindings(reinterpret_cast<void*>(manager));
 }
 
-void CaptureKeyboardPromptLocalization(const std::filesystem::path& requestedPath)
+bool WriteKeyboardPromptLocalizationFile(const std::filesystem::path& path,
+                                         std::string_view text)
+{
+    if (g_originalCreateFileA == nullptr)
+    {
+        return false;
+    }
+
+    const std::string narrowPath = path.string();
+    HANDLE file = g_originalCreateFileA(narrowPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+                                        nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        return false;
+    }
+
+    DWORD written = 0;
+    const bool succeeded = text.size() <= std::numeric_limits<DWORD>::max() &&
+                           WriteFile(file, text.data(), static_cast<DWORD>(text.size()),
+                                     &written, nullptr) != FALSE &&
+                           written == text.size();
+    CloseHandle(file);
+    return succeeded;
+}
+
+std::optional<std::filesystem::path> PrepareKeyboardPromptLocalization(
+    const std::filesystem::path& requestedPath)
 {
     if (!g_config.enableKeyboardPromptLabels || requestedPath.empty() ||
         !IsLocalizedStringsFileName(requestedPath.filename().string()))
     {
-        return;
+        return std::nullopt;
     }
 
     std::error_code error;
@@ -2517,14 +2544,17 @@ void CaptureKeyboardPromptLocalization(const std::filesystem::path& requestedPat
         sourcePath = std::filesystem::absolute(sourcePath, error);
         if (error)
         {
-            return;
+            return std::nullopt;
         }
     }
 
+    const std::filesystem::path generatedPath =
+        g_moduleDirectory / ("ShepherdPatch.keyboard." + sourcePath.filename().string());
     if (sourcePath == g_keyboardPromptLocalizationPath &&
-        !g_liveKeyboardPromptStrings.empty())
+        !g_liveKeyboardPromptStrings.empty() &&
+        std::filesystem::exists(generatedPath, error) && !error)
     {
-        return;
+        return generatedPath;
     }
 
     const auto sourceText = ReadTextFile(sourcePath);
@@ -2533,17 +2563,28 @@ void CaptureKeyboardPromptLocalization(const std::filesystem::path& requestedPat
     const auto bindingsText = ReadTextFile(bindingsPath);
     if (!sourceText || !bindingsText)
     {
-        return;
+        return std::nullopt;
     }
 
     g_keyboardPromptBaseBindings = ParseKeyboardPromptBindings(*bindingsText);
     if (g_keyboardPromptBaseBindings.empty())
     {
-        return;
+        return std::nullopt;
+    }
+
+    const std::string transformed =
+        ReplaceKeyboardPromptTokens(*sourceText, g_keyboardPromptBaseBindings);
+    if (transformed == *sourceText ||
+        !WriteKeyboardPromptLocalizationFile(generatedPath, transformed))
+    {
+        Log("Keyboard prompt localization generation failed; using the stock table.");
+        return std::nullopt;
     }
 
     CaptureKeyboardPromptStrings(*sourceText);
     g_keyboardPromptLocalizationPath = std::move(sourcePath);
+    Log("Generated keyboard prompt localization table: " + generatedPath.string());
+    return generatedPath;
 }
 
 HANDLE WINAPI HookedCreateFileA(LPCSTR fileName, DWORD desiredAccess, DWORD shareMode,
@@ -2556,13 +2597,18 @@ HANDLE WINAPI HookedCreateFileA(LPCSTR fileName, DWORD desiredAccess, DWORD shar
         return INVALID_HANDLE_VALUE;
     }
 
+    std::string redirectedPath;
     if (fileName != nullptr && (desiredAccess & (GENERIC_WRITE | FILE_APPEND_DATA)) == 0)
     {
         std::scoped_lock lock(g_keyboardPromptFileMutex);
-        CaptureKeyboardPromptLocalization(fileName);
+        if (const auto generatedPath = PrepareKeyboardPromptLocalization(fileName))
+        {
+            redirectedPath = generatedPath->string();
+        }
     }
 
-    return g_originalCreateFileA(fileName, desiredAccess, shareMode, securityAttributes,
+    return g_originalCreateFileA(redirectedPath.empty() ? fileName : redirectedPath.c_str(),
+                                 desiredAccess, shareMode, securityAttributes,
                                  creationDisposition, flagsAndAttributes, templateFile);
 }
 
