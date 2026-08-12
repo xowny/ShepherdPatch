@@ -20,6 +20,7 @@ TEST_CASE(ParseConfigReadsBoolAndIntegerOverrides)
         "EnablePreciseSleepShim = false\n"
         "EnableCrashDumps = false\n"
         "EnableFrameRateUnlock = false\n"
+        "SkipStartupLogos = true\n"
         "SynchronizeEngineVars = false\n"
         "EnableGamesMmcssProfile = false\n"
         "DisablePowerThrottling = false\n"
@@ -60,6 +61,7 @@ TEST_CASE(ParseConfigReadsBoolAndIntegerOverrides)
     CHECK_TRUE(!config.enablePreciseSleepShim);
     CHECK_TRUE(!config.enableCrashDumps);
     CHECK_TRUE(!config.enableFrameRateUnlock);
+    CHECK_TRUE(config.skipStartupLogos);
     CHECK_TRUE(!config.synchronizeEngineVars);
     CHECK_TRUE(!config.enableGamesMmcssProfile);
     CHECK_TRUE(!config.disablePowerThrottling);
@@ -109,6 +111,7 @@ TEST_CASE(ParseConfigUsesConservativeDefaultsWhenFileIsMissing)
     CHECK_TRUE(config.enablePreciseSleepShim);
     CHECK_TRUE(config.enableCrashDumps);
     CHECK_TRUE(config.enableFrameRateUnlock);
+    CHECK_TRUE(!config.skipStartupLogos);
     CHECK_TRUE(config.synchronizeEngineVars);
     CHECK_TRUE(config.enableGamesMmcssProfile);
     CHECK_TRUE(config.disablePowerThrottling);

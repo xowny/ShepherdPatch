@@ -34,6 +34,7 @@ struct Config
     bool hardenDirectInputMouseDevice = true;
     bool reduceBorderlessPresentStutter = true;
     bool reduceMenuMovieStutter = true;
+    bool skipStartupLogos = false;
     bool enableFlipExSwapEffect = true;
     std::uint32_t legacyGraphicsRetryDelayMilliseconds = 100;
     std::uint32_t legacyThreadTerminateGraceMilliseconds = 250;

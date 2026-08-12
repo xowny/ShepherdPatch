@@ -19,9 +19,11 @@ Nexus Mods: https://www.nexusmods.com/silenthillhomecoming/mods/10
 - Correct map, document, and item panels at high resolutions
 - 60 FPS support and frame pacing improvements
 - Raw mouse input with sensitivity and invert-Y options
+- Readable keyboard and mouse prompt labels with live keyboard-rebind updates
 - Safer device reset and windowed recovery behavior
 - Legacy timer, thread, and input hardening
 - Reduced menu movie stutter for known Bink menu-loop playback issues
+- Optional startup-logo skip that leaves the game archives unchanged on disk
 - Crash dump generation for troubleshooting
 - Standalone WinUI configurator with a game-folder selector
 - Basic and advanced configuration views

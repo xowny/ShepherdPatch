@@ -380,6 +380,10 @@
                                                 <CheckBox x:Name="HardenDirectInputMouseDeviceToggle" Click="AnySettingChanged" Content="Harden DirectInput mouse device (Experimental)" Style="{StaticResource HomecomingCheckBoxStyle}" />
                                                 <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Experimental. Normalizes mouse reacquire behavior during focus changes and alt-tab." />
                                             </StackPanel>
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Width="220">
+                                                <CheckBox x:Name="EnableKeyboardPromptLabelsToggle" Click="AnySettingChanged" Content="Keyboard prompt labels" HorizontalAlignment="Right" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Shows current keyboard and mouse bindings instead of generic PC action icons." TextAlignment="Right" />
+                                            </StackPanel>
                                         </Grid>
 
                                         <Grid x:Name="InputValuesGrid" Style="{StaticResource ValuesGridStyle}" Margin="0,14,0,0">
@@ -609,6 +613,10 @@
                                             <StackPanel>
                                                 <CheckBox x:Name="ReduceMenuMovieStutterToggle" Click="AnySettingChanged" Content="Reduce menu movie stutter (Experimental)" HorizontalAlignment="Right" Style="{StaticResource HomecomingCheckBoxStyle}" />
                                                 <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Experimental. Forces the known menu-loop Bink movies off their internal wait path so they are less likely to hitch rendering. It does not skip or disable cutscenes." />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Width="220">
+                                                <CheckBox x:Name="SkipStartupLogosToggle" Click="AnySettingChanged" Content="Skip startup logos" HorizontalAlignment="Right" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Skips only the startup company and legal screens. Gameplay cinematics are unchanged." TextAlignment="Right" />
                                             </StackPanel>
                                         </Grid>
                                     </StackPanel>

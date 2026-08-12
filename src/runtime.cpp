@@ -115,6 +115,8 @@ using CreateThreadFn = HANDLE(WINAPI*)(LPSECURITY_ATTRIBUTES, SIZE_T, LPTHREAD_S
                                        LPVOID, DWORD, LPDWORD);
 using CreateFileAFn = HANDLE(WINAPI*)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD,
                                       HANDLE);
+using ReadFileFn = BOOL(WINAPI*)(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
+using CloseHandleFn = BOOL(WINAPI*)(HANDLE);
 using ResumeThreadFn = DWORD(WINAPI*)(HANDLE);
 using SuspendThreadFn = DWORD(WINAPI*)(HANDLE);
 using TerminateThreadFn = BOOL(WINAPI*)(HANDLE, DWORD);
@@ -295,6 +297,12 @@ DirectInputSetCooperativeLevelAFn g_originalDirectInputSetCooperativeLevelA = nu
 DirectInputSetCooperativeLevelWFn g_originalDirectInputSetCooperativeLevelW = nullptr;
 CreateThreadFn g_originalCreateThread = nullptr;
 CreateFileAFn g_originalCreateFileA = nullptr;
+ReadFileFn g_originalReadFile = nullptr;
+CloseHandleFn g_originalCloseHandle = nullptr;
+std::atomic<std::uintptr_t> g_startupLogoPakHandle = 0;
+std::atomic<bool> g_startupLogoStreamHooksReady = false;
+std::atomic<std::size_t> g_startupLogoPatchedByteCount = 0;
+std::atomic<bool> g_startupLogoMismatchLogged = false;
 ResumeThreadFn g_originalResumeThread = nullptr;
 SuspendThreadFn g_originalSuspendThread = nullptr;
 TerminateThreadFn g_originalTerminateThread = nullptr;
@@ -2623,9 +2631,98 @@ HANDLE WINAPI HookedCreateFileA(LPCSTR fileName, DWORD desiredAccess, DWORD shar
         }
     }
 
-    return g_originalCreateFileA(redirectedPath.empty() ? fileName : redirectedPath.c_str(),
-                                 desiredAccess, shareMode, securityAttributes,
-                                 creationDisposition, flagsAndAttributes, templateFile);
+    HANDLE file = g_originalCreateFileA(redirectedPath.empty() ? fileName : redirectedPath.c_str(),
+                                        desiredAccess, shareMode, securityAttributes,
+                                        creationDisposition, flagsAndAttributes, templateFile);
+    if (file != INVALID_HANDLE_VALUE && fileName != nullptr && g_config.skipStartupLogos &&
+        g_startupLogoStreamHooksReady.load(std::memory_order_acquire) &&
+        (desiredAccess & (GENERIC_WRITE | FILE_APPEND_DATA)) == 0)
+    {
+        LARGE_INTEGER fileSize = {};
+        if (GetFileSizeEx(file, &fileSize) && fileSize.QuadPart >= 0 &&
+            IsSupportedGlobalPakPath(fileName,
+                                     static_cast<std::uint64_t>(fileSize.QuadPart)))
+        {
+            g_startupLogoPakHandle.store(reinterpret_cast<std::uintptr_t>(file),
+                                         std::memory_order_release);
+            Log("Startup-logo archive stream detected; timer patch armed.");
+        }
+    }
+    return file;
+}
+
+BOOL WINAPI HookedReadFile(HANDLE file, LPVOID buffer, DWORD bytesToRead,
+                           LPDWORD bytesRead, LPOVERLAPPED overlapped)
+{
+    if (g_originalReadFile == nullptr)
+    {
+        SetLastError(ERROR_INVALID_FUNCTION);
+        return FALSE;
+    }
+
+    std::uint64_t fileOffset = 0;
+    bool haveOffset = false;
+    const bool isLogoArchive = reinterpret_cast<std::uintptr_t>(file) ==
+                               g_startupLogoPakHandle.load(std::memory_order_acquire);
+    if (isLogoArchive)
+    {
+        if (overlapped != nullptr)
+        {
+            fileOffset = (static_cast<std::uint64_t>(overlapped->OffsetHigh) << 32) |
+                         overlapped->Offset;
+            haveOffset = true;
+        }
+        else
+        {
+            LARGE_INTEGER zero = {};
+            LARGE_INTEGER current = {};
+            if (SetFilePointerEx(file, zero, &current, FILE_CURRENT) && current.QuadPart >= 0)
+            {
+                fileOffset = static_cast<std::uint64_t>(current.QuadPart);
+                haveOffset = true;
+            }
+        }
+    }
+
+    const BOOL succeeded =
+        g_originalReadFile(file, buffer, bytesToRead, bytesRead, overlapped);
+    if (!succeeded || !isLogoArchive || !haveOffset || buffer == nullptr ||
+        bytesRead == nullptr || *bytesRead == 0)
+    {
+        return succeeded;
+    }
+
+    const StartupLogoPatchResult patch = PatchStartupLogoTimers(
+        fileOffset, std::span<std::uint8_t>(static_cast<std::uint8_t*>(buffer), *bytesRead));
+    if (patch.patchedBytes != 0)
+    {
+        const std::size_t total =
+            g_startupLogoPatchedByteCount.fetch_add(patch.patchedBytes,
+                                                    std::memory_order_relaxed) +
+            patch.patchedBytes;
+        std::ostringstream message;
+        message << "Startup-logo timers shortened in streamed archive data: +"
+                << patch.patchedBytes << ", total=" << total << "/16.";
+        Log(message.str());
+    }
+    if (patch.mismatchedBytes != 0 &&
+        !g_startupLogoMismatchLogged.exchange(true, std::memory_order_relaxed))
+    {
+        Log("Startup-logo timer patch rejected unexpected archive bytes.");
+    }
+    return succeeded;
+}
+
+BOOL WINAPI HookedCloseHandle(HANDLE handle)
+{
+    const std::uintptr_t closing = reinterpret_cast<std::uintptr_t>(handle);
+    std::uintptr_t tracked = g_startupLogoPakHandle.load(std::memory_order_acquire);
+    if (closing == tracked)
+    {
+        g_startupLogoPakHandle.compare_exchange_strong(
+            tracked, 0, std::memory_order_acq_rel);
+    }
+    return g_originalCloseHandle != nullptr ? g_originalCloseHandle(handle) : FALSE;
 }
 
 const char* __fastcall HookedPromptResourceResolver(void* manager, void* /*reserved*/,
@@ -2808,7 +2905,8 @@ void LogPatchConfigSnapshot()
             << ", borderless=" << g_config.forceBorderless
             << ", rawMouse=" << g_config.enableRawMouseInput
             << ", highResolutionUi=" << g_config.enableHighResolutionUiFix
-            << ", keyboardPromptLabels=" << g_config.enableKeyboardPromptLabels;
+            << ", keyboardPromptLabels=" << g_config.enableKeyboardPromptLabels
+            << ", skipStartupLogos=" << g_config.skipStartupLogos;
     Log(message.str());
 }
 
@@ -6315,7 +6413,8 @@ bool InstallEngineHooks(HMODULE engineModule)
 
 bool InstallKeyboardPromptHook(HMODULE engineModule)
 {
-    if (!g_config.enableKeyboardPromptLabels || engineModule == nullptr)
+    if ((!g_config.enableKeyboardPromptLabels && !g_config.skipStartupLogos) ||
+        engineModule == nullptr)
     {
         return false;
     }
@@ -6326,6 +6425,34 @@ bool InstallKeyboardPromptHook(HMODULE engineModule)
     {
         Log("Failed to install keyboard prompt localization hook.");
         return false;
+    }
+
+    Log("Engine file-open hook installed.");
+
+    if (g_config.skipStartupLogos)
+    {
+        const bool readInstalled = InstallIatHook(
+            engineModule, "kernel32.dll", "ReadFile",
+            reinterpret_cast<void*>(&HookedReadFile),
+            reinterpret_cast<void**>(&g_originalReadFile));
+        const bool closeInstalled = InstallIatHook(
+            engineModule, "kernel32.dll", "CloseHandle",
+            reinterpret_cast<void*>(&HookedCloseHandle),
+            reinterpret_cast<void**>(&g_originalCloseHandle));
+        if (readInstalled && closeInstalled)
+        {
+            g_startupLogoStreamHooksReady.store(true, std::memory_order_release);
+            Log("Startup-logo streamed archive hooks installed.");
+        }
+        else
+        {
+            Log("Startup-logo skip disabled: archive stream hooks were incomplete.");
+        }
+    }
+
+    if (!g_config.enableKeyboardPromptLabels)
+    {
+        return true;
     }
 
     Log("Keyboard prompt localization hook installed.");

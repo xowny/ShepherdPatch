@@ -175,6 +175,23 @@ std::optional<std::string> JoinBindings(
     return result;
 }
 
+std::optional<std::string_view> ResolveAliasCommand(std::string_view token)
+{
+    static const std::unordered_map<std::string, std::string_view> aliases{
+        {"ACTION", "COMMAND_KICK"},
+        {"FIRE", "COMMAND_KICK"},
+        {"HEAVY_ATTACK", "COMMAND_PUNCH"},
+        {"DEFENSE", "COMMAND_JUMP"},
+        {"TARGETING", "COMMAND_STALK"},
+        {"COMBAT_WHEEL", "COMMAND_RELOAD"},
+        {"INVENTORY_WHEEL", "COMMAND_BLOCK"},
+        {"UI_TOGGLE_MAP", "COMMAND_USE"},
+    };
+    const auto alias = aliases.find(Upper(token));
+    return alias != aliases.end() ? std::optional<std::string_view>(alias->second)
+                                  : std::nullopt;
+}
+
 std::optional<std::string> ResolveToken(
     const KeyboardPromptBindings& bindings, std::string_view token)
 {
@@ -188,20 +205,9 @@ std::optional<std::string> ResolveToken(
         return FindBinding(bindings, upperToken);
     }
 
-    static const std::unordered_map<std::string, std::string_view> aliases{
-        {"ACTION", "COMMAND_KICK"},
-        {"FIRE", "COMMAND_KICK"},
-        {"HEAVY_ATTACK", "COMMAND_PUNCH"},
-        {"DEFENSE", "COMMAND_JUMP"},
-        {"TARGETING", "COMMAND_STALK"},
-        {"COMBAT_WHEEL", "COMMAND_RELOAD"},
-        {"INVENTORY_WHEEL", "COMMAND_BLOCK"},
-        {"UI_TOGGLE_MAP", "COMMAND_USE"},
-    };
-    const auto alias = aliases.find(upperToken);
-    if (alias != aliases.end())
+    if (const auto alias = ResolveAliasCommand(upperToken))
     {
-        return FindBinding(bindings, alias->second);
+        return FindBinding(bindings, *alias);
     }
 
     if (upperToken == "COMMAND_MOVEMENT")
@@ -327,15 +333,7 @@ std::string ReplaceKeyboardPromptTokens(
 
         const std::string_view token = text.substr(opening + 1, closing - opening - 1);
         const auto replacement = ResolveToken(bindings, token);
-        if (replacement == "LMB")
-        {
-            output += "<COMMAND_MOUSE_LEFT_CLICK>";
-        }
-        else if (replacement == "RMB")
-        {
-            output += "<COMMAND_MOUSE_RIGHT_CLICK>";
-        }
-        else if (replacement)
+        if (replacement)
         {
             output += '[';
             output += *replacement;
@@ -347,6 +345,7 @@ std::string ReplaceKeyboardPromptTokens(
         }
         cursor = closing + 1;
     }
+
     return output;
 }
 

@@ -67,8 +67,7 @@ TEST_CASE(ReplaceKeyboardPromptTokensUsesAliasesAndKeepsMarkup)
         "<COLOR,1,2,3>Press <ACTION> or <HEAVY_ATTACK>.<CLEARCOLOR>", bindings);
 
     CHECK_EQ(result,
-             std::string("<COLOR,1,2,3>Press <COMMAND_MOUSE_LEFT_CLICK> or "
-                         "<COMMAND_MOUSE_RIGHT_CLICK>.<CLEARCOLOR>"));
+             std::string("<COLOR,1,2,3>Press [LMB] or [RMB].<CLEARCOLOR>"));
 }
 
 TEST_CASE(ReplaceKeyboardPromptTokensMapsDefenseToCurrentDodgeBinding)
@@ -101,6 +100,19 @@ TEST_CASE(ReplaceKeyboardPromptTokensLeavesUnknownTokensUntouched)
              std::string("Press <COMMAND_UNKNOWN> <CLEARCOLOR>"));
 }
 
+TEST_CASE(ReplaceKeyboardPromptTokensUsesReadableMouseLabelsForInteractionVerbs)
+{
+    const auto bindings = shh::ParseKeyboardPromptBindings(
+        "setbind 0 COMMAND_KICK MOUSE 0 BUTTON_0 -1 1 1\n");
+
+    CHECK_EQ(shh::ReplaceKeyboardPromptTokens(" <COMMAND_KICK> Save", bindings),
+             std::string(" [LMB] Save"));
+    CHECK_EQ(shh::ReplaceKeyboardPromptTokens("<COMMAND_KICK> Take", bindings),
+             std::string("[LMB] Take"));
+    CHECK_EQ(shh::ReplaceKeyboardPromptTokens(" <COMMAND_KICK> Open", bindings),
+             std::string(" [LMB] Open"));
+}
+
 TEST_CASE(AllShippingInputTokensHaveKeyboardOrMouseLabels)
 {
     const auto bindings = shh::ParseKeyboardPromptBindings(
@@ -130,10 +142,14 @@ TEST_CASE(AllShippingInputTokensHaveKeyboardOrMouseLabels)
     CHECK_TRUE(result.find("<ACTION>") == std::string::npos);
     CHECK_TRUE(result.find("<FIRE>") == std::string::npos);
     CHECK_TRUE(result.find("<COMMAND_KICK>") == std::string::npos);
-    CHECK_TRUE(result.find("<COMMAND_MOUSE_LEFT_CLICK>") != std::string::npos);
-    CHECK_TRUE(result.find("<COMMAND_MOUSE_RIGHT_CLICK>") != std::string::npos);
+    CHECK_TRUE(result.find("<COMMAND_STALK>") == std::string::npos);
+    CHECK_TRUE(result.find("<COMMAND_MOUSE_LEFT_CLICK>") == std::string::npos);
+    CHECK_TRUE(result.find("<COMMAND_MOUSE_RIGHT_CLICK>") == std::string::npos);
     CHECK_TRUE(result.find("<COMMAND_UI_X>") == std::string::npos);
     CHECK_TRUE(result.find("<INVENTORY_WHEEL>") == std::string::npos);
+    CHECK_TRUE(result.find("[LMB]") != std::string::npos);
+    CHECK_TRUE(result.find("[RMB]") != std::string::npos);
+    CHECK_TRUE(result.find("[Left Shift]") != std::string::npos);
     CHECK_TRUE(result.find("[WASD]") != std::string::npos);
     CHECK_TRUE(result.find("[Mouse]") != std::string::npos);
 }

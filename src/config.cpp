@@ -167,6 +167,10 @@ Config ParseConfig(std::string_view text)
             config.enableFrameRateUnlock =
                 ParseBoolValue(value, config.enableFrameRateUnlock);
         }
+        else if (key == "SkipStartupLogos")
+        {
+            config.skipStartupLogos = ParseBoolValue(value, config.skipStartupLogos);
+        }
         else if (key == "RawMouseSensitivity")
         {
             config.rawMouseSensitivity =
