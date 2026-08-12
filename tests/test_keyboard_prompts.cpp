@@ -20,7 +20,7 @@ TEST_CASE(MissingPcNavigationResourcesUseTheirMouseBindings)
              std::string_view("shv_buttonpcmouseleft_32"));
     CHECK_EQ(shh::ResolvePcPromptResourceOverride(20),
              std::string_view("shv_buttonpcmouseright_32"));
-    CHECK_TRUE(shh::ResolvePcPromptResourceOverride(54).empty());
+    CHECK_TRUE(shh::ResolvePcPromptResourceOverride(54) == nullptr);
     CHECK_EQ(shh::ResolvePcPromptCommand(19, ""), 19u);
     CHECK_EQ(shh::ResolvePcPromptCommand(20, ""), 20u);
     CHECK_EQ(shh::ResolvePcPromptCommand(54, ""), 54u);
@@ -115,7 +115,7 @@ TEST_CASE(ReplaceKeyboardPromptTokensUsesReadableMouseLabelsForInteractionVerbs)
 
 TEST_CASE(AllShippingInputTokensHaveKeyboardOrMouseLabels)
 {
-    const auto bindings = shh::ParseKeyboardPromptBindings(
+    auto bindings = shh::ParseKeyboardPromptBindings(
         "setbind 0 COMMAND_FORWARD KEYBOARD 0 KEY_W -1 1 1\n"
         "setbind 0 COMMAND_BACKWARD KEYBOARD 0 KEY_S -1 1 1\n"
         "setbind 0 COMMAND_LEFT KEYBOARD 0 KEY_A -1 1 1\n"
@@ -129,12 +129,15 @@ TEST_CASE(AllShippingInputTokensHaveKeyboardOrMouseLabels)
         "setbind 0 COMMAND_USE KEYBOARD 0 KEY_TAB -1 1 1\n"
         "setbind 0 COMMAND_RIGHT_THUMBSTICK_BUTTON MOUSE 0 BUTTON_2 -1 1 1\n"
         "setbind 0 COMMAND_UI_X KEYBOARD 0 KEY_3 -1 1 1\n");
+    bindings["COMMAND_MOUSE_LEFT_CLICK"] = "LMB";
+    bindings["COMMAND_MOUSE_RIGHT_CLICK"] = "RMB";
 
     const std::string source =
         "<ACTION> <FIRE> <HEAVY_ATTACK> <DEFENSE> <TARGETING> "
         "<COMBAT_WHEEL> <INVENTORY_WHEEL> <UI_TOGGLE_MAP> "
         "<COMMAND_KICK> <COMMAND_JUMP> <COMMAND_USE> <COMMAND_UI_X> "
         "<COMMAND_RIGHT_THUMBSTICK_BUTTON> <COMMAND_MOVEMENT> "
+        "<COMMAND_MOUSE_LEFT_CLICK> <COMMAND_MOUSE_RIGHT_CLICK> "
         "<COMMAND_LEFT_STICK_LEFTRIGHT> <COMMAND_LEFT_STICK_UPDOWN> "
         "<COMMAND_CAMERA>";
     const std::string result = shh::ReplaceKeyboardPromptTokens(source, bindings);

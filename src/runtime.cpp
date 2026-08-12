@@ -219,6 +219,11 @@ constexpr std::uint32_t kBinkPlaybackLogLimit = 24;
 constexpr DWORD kLostDeviceDeactivateWindowMs = 8000;
 constexpr DWORD kLostDeviceRestoreWindowMs = 4000;
 constexpr std::uint32_t kSyntheticLegacyTimerIdBase = 0x51510000u;
+constexpr std::size_t kBindingManagerEntryCountOffset = 0x228;
+constexpr std::size_t kBindingManagerEntryArrayOffset = 0x22C;
+constexpr std::size_t kBindingEntryStride = 14;
+constexpr std::size_t kBindingEntryScanCodeOffset = 12;
+constexpr std::uint32_t kBindingEntryCountLimit = 1024;
 
 bool ShouldUseImmediatePresentationInBorderless(const Config& config)
 {
@@ -2442,7 +2447,8 @@ void UpdateLoadedKeyboardPromptStringsLocked(const KeyboardScanCodeBindings& sca
 void SynchronizeLiveKeyboardBindings(void* manager)
 {
     if (manager == nullptr ||
-        !IsReadableMemoryRange(static_cast<const std::uint8_t*>(manager) + 0x228,
+        !IsReadableMemoryRange(static_cast<const std::uint8_t*>(manager) +
+                                   kBindingManagerEntryCountOffset,
                                sizeof(std::uint32_t) + sizeof(void*)))
     {
         return;
@@ -2450,10 +2456,14 @@ void SynchronizeLiveKeyboardBindings(void* manager)
 
     std::uint32_t count = 0;
     std::uint8_t* entries = nullptr;
-    std::memcpy(&count, static_cast<const std::uint8_t*>(manager) + 0x228, sizeof(count));
-    std::memcpy(&entries, static_cast<const std::uint8_t*>(manager) + 0x22C, sizeof(entries));
-    const std::size_t byteCount = static_cast<std::size_t>(count) * 14;
-    if (count == 0 || count > 1024 || entries == nullptr ||
+    std::memcpy(&count, static_cast<const std::uint8_t*>(manager) +
+                            kBindingManagerEntryCountOffset,
+                sizeof(count));
+    std::memcpy(&entries, static_cast<const std::uint8_t*>(manager) +
+                              kBindingManagerEntryArrayOffset,
+                sizeof(entries));
+    const std::size_t byteCount = static_cast<std::size_t>(count) * kBindingEntryStride;
+    if (count == 0 || count > kBindingEntryCountLimit || entries == nullptr ||
         !IsReadableMemoryRange(entries, byteCount))
     {
         return;
@@ -2462,10 +2472,11 @@ void SynchronizeLiveKeyboardBindings(void* manager)
     KeyboardScanCodeBindings current;
     for (std::uint32_t index = 0; index < count; ++index)
     {
-        const std::uint8_t* entry = entries + static_cast<std::size_t>(index) * 14;
+        const std::uint8_t* entry =
+            entries + static_cast<std::size_t>(index) * kBindingEntryStride;
         if (entry[1] == 0 && entry[2] == 0 && !current.contains(entry[0]))
         {
-            current.emplace(entry[0], entry[12]);
+            current.emplace(entry[0], entry[kBindingEntryScanCodeOffset]);
         }
     }
 
@@ -2740,11 +2751,10 @@ const char* __fastcall HookedPromptResourceResolver(void* manager, void* /*reser
     const auto resourceText = TryReadPromptResourceText(resource);
     if (g_originalPromptResourceResolver != nullptr)
     {
-        if (const std::string_view overrideResource =
-                ResolvePcPromptResourceOverride(commandId);
-            !overrideResource.empty())
+        if (const char* overrideResource = ResolvePcPromptResourceOverride(commandId);
+            overrideResource != nullptr)
         {
-            resource = overrideResource.data();
+            resource = overrideResource;
         }
         else
         {
@@ -2773,9 +2783,9 @@ const char* __fastcall HookedPromptResourceResolver(void* manager, void* /*reser
                 << ", resolvedCommand=" << resolvedCommandId
                 << ", alternateIcon=" << alternateIcon
                 << ", resource=" << FormatAddress(reinterpret_cast<std::uintptr_t>(resource));
-        if (const auto resourceText = TryReadPromptResourceText(resource))
+        if (const auto finalResourceText = TryReadPromptResourceText(resource))
         {
-            message << ", text=\"" << *resourceText << '"';
+            message << ", text=\"" << *finalResourceText << '"';
         }
         Log(message.str());
     }
@@ -6411,7 +6421,7 @@ bool InstallEngineHooks(HMODULE engineModule)
     return true;
 }
 
-bool InstallKeyboardPromptHook(HMODULE engineModule)
+bool InstallEngineFileHooks(HMODULE engineModule)
 {
     if ((!g_config.enableKeyboardPromptLabels && !g_config.skipStartupLogos) ||
         engineModule == nullptr)
@@ -6979,7 +6989,7 @@ bool InstallHooks()
     ResolveSchedulerTimingPointers(engineModule);
 
     bool installedAnyHook = false;
-    installedAnyHook |= InstallKeyboardPromptHook(engineModule);
+    installedAnyHook |= InstallEngineFileHooks(engineModule);
     installedAnyHook |= InstallEngineHooks(engineModule);
     installedAnyHook |= InstallPreciseSleepHook(engineModule);
     installedAnyHook |= InstallSchedulerLoopUpdateHook(engineModule);

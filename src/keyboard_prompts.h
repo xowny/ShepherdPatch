@@ -17,7 +17,7 @@ std::string ReplaceKeyboardPromptTokens(
     std::string_view text, const KeyboardPromptBindings& bindings);
 bool IsLocalizedStringsFileName(std::string_view fileName);
 bool IsGenericPcActionResource(std::string_view resourceName);
-std::string_view ResolvePcPromptResourceOverride(std::uint32_t commandId);
+const char* ResolvePcPromptResourceOverride(std::uint32_t commandId);
 std::uint32_t ResolvePcPromptCommand(std::uint32_t commandId,
                                      std::string_view resourceName);
 } // namespace shh

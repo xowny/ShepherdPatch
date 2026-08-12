@@ -362,13 +362,13 @@ bool IsGenericPcActionResource(std::string_view resourceName)
     return name == "SHV_BUTTONACTIONPC" || name == "PC_DODGEFLASH";
 }
 
-std::string_view ResolvePcPromptResourceOverride(std::uint32_t commandId)
+const char* ResolvePcPromptResourceOverride(std::uint32_t commandId)
 {
     if (commandId == 19)
         return "shv_buttonpcmouseleft_32";
     if (commandId == 20)
         return "shv_buttonpcmouseright_32";
-    return {};
+    return nullptr;
 }
 
 std::uint32_t ResolvePcPromptCommand(std::uint32_t commandId,

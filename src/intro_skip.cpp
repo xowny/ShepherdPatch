@@ -99,20 +99,28 @@ StartupLogoPatchResult PatchStartupLogoTimers(std::uint64_t fileOffset,
         return result;
     }
 
+    // Fail closed unless this read contains the complete known signature.
+    // The supported game reads this script region as one buffer; requiring the
+    // full set prevents a partial match (or a recycled handle) from changing
+    // unrelated data.
+    if (kStartupLogoTimerBytes.front().offset < fileOffset ||
+        kStartupLogoTimerBytes.back().offset >= endOffset)
+    {
+        return result;
+    }
+
     for (const StartupLogoTimerByte timer : kStartupLogoTimerBytes)
     {
-        if (timer.offset < fileOffset || timer.offset >= endOffset)
+        if (bytes[static_cast<std::size_t>(timer.offset - fileOffset)] != timer.expected)
         {
-            continue;
+            result.mismatchedBytes = 1;
+            return result;
         }
+    }
 
+    for (const StartupLogoTimerByte timer : kStartupLogoTimerBytes)
+    {
         std::uint8_t& value = bytes[static_cast<std::size_t>(timer.offset - fileOffset)];
-        if (value != timer.expected)
-        {
-            ++result.mismatchedBytes;
-            continue;
-        }
-
         value = '0';
         ++result.patchedBytes;
     }
