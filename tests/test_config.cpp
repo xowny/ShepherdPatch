@@ -11,6 +11,7 @@ TEST_CASE(ParseConfigReadsBoolAndIntegerOverrides)
         "EnableDpiAwareness = false\n"
         "EnableUltrawideFovFix = false\n"
         "EnableHighResolutionUiFix = false\n"
+        "EnableKeyboardPromptLabels = true\n"
         "ForceBorderless = false\n"
         "RetryResetInWindowedMode = true\n"
         "EnableHighPrecisionTiming = false\n"
@@ -50,6 +51,7 @@ TEST_CASE(ParseConfigReadsBoolAndIntegerOverrides)
     CHECK_TRUE(!config.enableDpiAwareness);
     CHECK_TRUE(!config.enableUltrawideFovFix);
     CHECK_TRUE(!config.enableHighResolutionUiFix);
+    CHECK_TRUE(config.enableKeyboardPromptLabels);
     CHECK_TRUE(!config.forceBorderless);
     CHECK_TRUE(config.retryResetInWindowedMode);
     CHECK_TRUE(!config.enableHighPrecisionTiming);
@@ -98,6 +100,7 @@ TEST_CASE(ParseConfigUsesConservativeDefaultsWhenFileIsMissing)
     CHECK_TRUE(config.enableDpiAwareness);
     CHECK_TRUE(config.enableUltrawideFovFix);
     CHECK_TRUE(config.enableHighResolutionUiFix);
+    CHECK_TRUE(!config.enableKeyboardPromptLabels);
     CHECK_TRUE(!config.forceBorderless);
     CHECK_TRUE(config.retryResetInWindowedMode);
     CHECK_TRUE(config.enableHighPrecisionTiming);

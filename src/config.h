@@ -12,6 +12,7 @@ struct Config
     bool enableDpiAwareness = true;
     bool enableUltrawideFovFix = true;
     bool enableHighResolutionUiFix = true;
+    bool enableKeyboardPromptLabels = false;
     bool forceBorderless = false;
     bool retryResetInWindowedMode = true;
     bool enableHighPrecisionTiming = true;
