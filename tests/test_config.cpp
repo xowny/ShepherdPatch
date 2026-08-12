@@ -11,6 +11,7 @@ TEST_CASE(ParseConfigReadsBoolAndIntegerOverrides)
         "EnableDpiAwareness = false\n"
         "EnableUltrawideFovFix = false\n"
         "EnableHighResolutionUiFix = false\n"
+        "EnableKeyboardPromptLabels = true\n"
         "ForceBorderless = false\n"
         "RetryResetInWindowedMode = true\n"
         "EnableHighPrecisionTiming = false\n"
@@ -19,6 +20,7 @@ TEST_CASE(ParseConfigReadsBoolAndIntegerOverrides)
         "EnablePreciseSleepShim = false\n"
         "EnableCrashDumps = false\n"
         "EnableFrameRateUnlock = false\n"
+        "SkipStartupLogos = true\n"
         "SynchronizeEngineVars = false\n"
         "EnableGamesMmcssProfile = false\n"
         "DisablePowerThrottling = false\n"
@@ -50,6 +52,7 @@ TEST_CASE(ParseConfigReadsBoolAndIntegerOverrides)
     CHECK_TRUE(!config.enableDpiAwareness);
     CHECK_TRUE(!config.enableUltrawideFovFix);
     CHECK_TRUE(!config.enableHighResolutionUiFix);
+    CHECK_TRUE(config.enableKeyboardPromptLabels);
     CHECK_TRUE(!config.forceBorderless);
     CHECK_TRUE(config.retryResetInWindowedMode);
     CHECK_TRUE(!config.enableHighPrecisionTiming);
@@ -58,6 +61,7 @@ TEST_CASE(ParseConfigReadsBoolAndIntegerOverrides)
     CHECK_TRUE(!config.enablePreciseSleepShim);
     CHECK_TRUE(!config.enableCrashDumps);
     CHECK_TRUE(!config.enableFrameRateUnlock);
+    CHECK_TRUE(config.skipStartupLogos);
     CHECK_TRUE(!config.synchronizeEngineVars);
     CHECK_TRUE(!config.enableGamesMmcssProfile);
     CHECK_TRUE(!config.disablePowerThrottling);
@@ -98,6 +102,7 @@ TEST_CASE(ParseConfigUsesConservativeDefaultsWhenFileIsMissing)
     CHECK_TRUE(config.enableDpiAwareness);
     CHECK_TRUE(config.enableUltrawideFovFix);
     CHECK_TRUE(config.enableHighResolutionUiFix);
+    CHECK_TRUE(!config.enableKeyboardPromptLabels);
     CHECK_TRUE(!config.forceBorderless);
     CHECK_TRUE(config.retryResetInWindowedMode);
     CHECK_TRUE(config.enableHighPrecisionTiming);
@@ -106,6 +111,7 @@ TEST_CASE(ParseConfigUsesConservativeDefaultsWhenFileIsMissing)
     CHECK_TRUE(config.enablePreciseSleepShim);
     CHECK_TRUE(config.enableCrashDumps);
     CHECK_TRUE(config.enableFrameRateUnlock);
+    CHECK_TRUE(!config.skipStartupLogos);
     CHECK_TRUE(config.synchronizeEngineVars);
     CHECK_TRUE(config.enableGamesMmcssProfile);
     CHECK_TRUE(config.disablePowerThrottling);

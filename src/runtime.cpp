@@ -12,6 +12,7 @@
 #include "gameplay_delta.h"
 #include "high_resolution_ui.h"
 #include "intro_skip.h"
+#include "keyboard_prompts.h"
 #include "legacy_runtime_policy.h"
 #include "lost_device_policy.h"
 #include "memory_utils.h"
@@ -56,6 +57,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace shh
 {
@@ -88,6 +90,7 @@ using SetTransformFn =
     HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, D3DTRANSFORMSTATETYPE, const D3DMATRIX*);
 using SetViewportFn = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, CONST D3DVIEWPORT9*);
 using EngineSettingsInitFn = void(__fastcall*)(void*);
+using PromptResourceResolverFn = const char*(__thiscall*)(void*, std::uint32_t, std::uint32_t);
 using EngineSleepExFn = void(__cdecl*)(float, BOOL);
 using SchedulerLoopUpdateFn = void(__fastcall*)(void*, void*, float);
 using GameplayUpdateFn = std::uint32_t(__fastcall*)(void*, void*, float*, char);
@@ -110,6 +113,10 @@ using SetProcessDpiAwarenessContextFn = BOOL(WINAPI*)(DPI_AWARENESS_CONTEXT);
 using SetProcessDPIAwareFn = BOOL(WINAPI*)();
 using CreateThreadFn = HANDLE(WINAPI*)(LPSECURITY_ATTRIBUTES, SIZE_T, LPTHREAD_START_ROUTINE,
                                        LPVOID, DWORD, LPDWORD);
+using CreateFileAFn = HANDLE(WINAPI*)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD,
+                                      HANDLE);
+using ReadFileFn = BOOL(WINAPI*)(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
+using CloseHandleFn = BOOL(WINAPI*)(HANDLE);
 using ResumeThreadFn = DWORD(WINAPI*)(HANDLE);
 using SuspendThreadFn = DWORD(WINAPI*)(HANDLE);
 using TerminateThreadFn = BOOL(WINAPI*)(HANDLE, DWORD);
@@ -155,6 +162,7 @@ constexpr std::size_t kDirectInputGetDeviceStateVtableIndex = 9;
 constexpr std::size_t kDirectInputSetCooperativeLevelVtableIndex = 13;
 constexpr std::size_t kRelativeJumpLength = 5;
 constexpr std::uintptr_t kEngineSettingsInitRva = 0x00A27970;
+constexpr std::uintptr_t kPromptResourceResolverRva = 0x00986360;
 constexpr std::uintptr_t kLegacyFramePacingTimerCallerRva = 0x00A436F6;
 constexpr std::uintptr_t kEngineSleepExRva = 0x0080BAC0;
 constexpr std::uintptr_t kHashStringRva = 0x0088B6A0;
@@ -211,6 +219,11 @@ constexpr std::uint32_t kBinkPlaybackLogLimit = 24;
 constexpr DWORD kLostDeviceDeactivateWindowMs = 8000;
 constexpr DWORD kLostDeviceRestoreWindowMs = 4000;
 constexpr std::uint32_t kSyntheticLegacyTimerIdBase = 0x51510000u;
+constexpr std::size_t kBindingManagerEntryCountOffset = 0x228;
+constexpr std::size_t kBindingManagerEntryArrayOffset = 0x22C;
+constexpr std::size_t kBindingEntryStride = 14;
+constexpr std::size_t kBindingEntryScanCodeOffset = 12;
+constexpr std::uint32_t kBindingEntryCountLimit = 1024;
 
 bool ShouldUseImmediatePresentationInBorderless(const Config& config)
 {
@@ -274,6 +287,7 @@ EndSceneFn g_originalEndSceneCodeGateway = nullptr;
 SetTransformFn g_originalSetTransform = nullptr;
 SetViewportFn g_originalSetViewport = nullptr;
 EngineSettingsInitFn g_originalEngineSettingsInit = nullptr;
+PromptResourceResolverFn g_originalPromptResourceResolver = nullptr;
 EngineSleepExFn g_originalEngineSleepEx = nullptr;
 SchedulerLoopUpdateFn g_originalSchedulerLoopUpdate = nullptr;
 GameplayUpdateFn g_originalGameplayUpdate = nullptr;
@@ -287,6 +301,13 @@ DirectInputGetDeviceStateWFn g_originalDirectInputGetDeviceStateW = nullptr;
 DirectInputSetCooperativeLevelAFn g_originalDirectInputSetCooperativeLevelA = nullptr;
 DirectInputSetCooperativeLevelWFn g_originalDirectInputSetCooperativeLevelW = nullptr;
 CreateThreadFn g_originalCreateThread = nullptr;
+CreateFileAFn g_originalCreateFileA = nullptr;
+ReadFileFn g_originalReadFile = nullptr;
+CloseHandleFn g_originalCloseHandle = nullptr;
+std::atomic<std::uintptr_t> g_startupLogoPakHandle = 0;
+std::atomic<bool> g_startupLogoStreamHooksReady = false;
+std::atomic<std::size_t> g_startupLogoPatchedByteCount = 0;
+std::atomic<bool> g_startupLogoMismatchLogged = false;
 ResumeThreadFn g_originalResumeThread = nullptr;
 SuspendThreadFn g_originalSuspendThread = nullptr;
 TerminateThreadFn g_originalTerminateThread = nullptr;
@@ -363,6 +384,7 @@ std::unordered_set<std::uintptr_t> g_loggedTimeSetEventCallers;
 std::unordered_set<std::uintptr_t> g_loggedSetWaitableTimerCallers;
 std::unordered_set<std::uintptr_t> g_loggedLegacyGraphicsRetrySleepCallers;
 std::unordered_set<std::uintptr_t> g_loggedCreateThreadCallers;
+std::unordered_set<std::uint64_t> g_loggedPromptResourceRequests;
 std::unordered_set<std::uintptr_t> g_loggedLegacyThreadWrapperCreateCallers;
 std::unordered_set<std::uint64_t> g_loggedLegacyThreadWrapperPayloads;
 std::unordered_set<std::uintptr_t> g_loggedLegacyThreadResumeSuppressCallers;
@@ -392,6 +414,29 @@ CadenceTracker g_endSceneCadence;
 CadenceTracker g_shvMainLoopCadence;
 CadenceSummaryWindow g_schedulerTimingSummary;
 std::mutex g_introMovieMutex;
+std::mutex g_keyboardPromptFileMutex;
+struct LoadedKeyboardPromptString
+{
+    char16_t* text = nullptr;
+    std::u16string currentText;
+};
+struct LiveKeyboardPromptString
+{
+    std::string sourceText;
+    std::u16string sourceTextUtf16;
+    std::vector<LoadedKeyboardPromptString> loadedText;
+    std::size_t capacity = 0;
+};
+KeyboardPromptBindings g_keyboardPromptBaseBindings;
+KeyboardScanCodeBindings g_liveKeyboardScanCodes;
+std::vector<LiveKeyboardPromptString> g_liveKeyboardPromptStrings;
+bool g_liveKeyboardPromptStringsLocated = false;
+std::filesystem::path g_keyboardPromptLocalizationPath;
+void* g_keyboardPromptLocalizationAllocation = nullptr;
+DWORD g_liveKeyboardPromptLastLocateTick = 0;
+std::uint32_t g_liveKeyboardPromptLocateAttempts = 0;
+std::atomic<std::uintptr_t> g_liveKeyboardBindingManager(0);
+std::atomic<DWORD> g_liveKeyboardBindingLastPollTick(0);
 std::unordered_map<void*, std::string> g_zeroWaitMenuMovies;
 std::unordered_map<void*, std::shared_ptr<TrackedBinkMovieState>> g_trackedBinkMovies;
 std::unordered_map<std::string, std::uint32_t> g_trackedBinkMovieOpenOrdinals;
@@ -446,6 +491,9 @@ bool PatchPointer(void** target, void* replacement);
 bool PatchVtableEntry(void* object, std::size_t index, void* replacement, void** original);
 bool InstallRelativeJumpDetour(void* target, std::size_t overwriteLength, void* replacement,
                                void** original);
+bool MatchesCodeSignature(const void* address,
+                          std::initializer_list<std::uint8_t> expectedBytes,
+                          std::string_view label);
 HRESULT TryGetSwapChainNoexcept(IDirect3DDevice9* device, UINT swapChainIndex,
                                 IDirect3DSwapChain9** swapChain);
 void ReleaseNoexcept(IUnknown* object);
@@ -503,6 +551,7 @@ LPTOP_LEVEL_EXCEPTION_FILTER WINAPI HookedSetUnhandledExceptionFilter(
 void InitializeExecutionPolicyApis();
 void ApplyProcessExecutionPolicy();
 void ApplyCurrentRenderThreadExecutionPolicy();
+void PollLiveKeyboardBindings();
 DWORD GetLostDeviceNowTick();
 void ArmLostDeviceRecoveryWindow(const char* reason, DWORD durationMs, bool markDeviceLoss);
 void NoteUserInitiatedWindowClose();
@@ -1365,6 +1414,8 @@ void ApplyCurrentRenderThreadExecutionPolicy()
                 << taskIndex << ").";
         Log(message.str());
     });
+
+    PollLiveKeyboardBindings();
 }
 
 CrashDumpTimestamp ToCrashDumpTimestamp(const SYSTEMTIME& time)
@@ -1550,6 +1601,7 @@ LRESULT CALLBACK HookedRawInputWndProc(HWND window, UINT message, WPARAM wParam,
         {
             ArmLostDeviceRecoveryWindow("window_activate", kLostDeviceRestoreWindowMs, false);
         }
+
     }
     else if (message == WM_SIZE)
     {
@@ -1902,6 +1954,35 @@ std::optional<std::string> TryReadLegacyThreadTagText(std::uintptr_t tagAddress)
     return text;
 }
 
+std::optional<std::string> TryReadPromptResourceText(const char* resource)
+{
+    if (resource == nullptr)
+    {
+        return std::nullopt;
+    }
+
+    std::string text;
+    text.reserve(96);
+    for (std::size_t index = 0; index < 160; ++index)
+    {
+        std::uint8_t value = 0;
+        if (!TryReadByteValue(reinterpret_cast<const std::uint8_t*>(resource) + index, value))
+        {
+            return std::nullopt;
+        }
+        if (value == 0)
+        {
+            return text.empty() ? std::nullopt : std::optional<std::string>(std::move(text));
+        }
+        if (value < 0x20 || value > 0x7E)
+        {
+            return std::nullopt;
+        }
+        text.push_back(static_cast<char>(value));
+    }
+    return std::nullopt;
+}
+
 void TrackLegacyWaitableTimerWorkerHandle(HANDLE timer,
                                           const std::optional<std::uint32_t>& dueTimeMs,
                                           LONG period, std::uintptr_t caller)
@@ -2087,6 +2168,631 @@ bool WriteTextFile(const std::filesystem::path& path, std::string_view text)
     return stream.good();
 }
 
+std::u16string PromptTextToUtf16(std::string_view text)
+{
+    if (text.empty())
+    {
+        return {};
+    }
+
+    const auto convert = [text](UINT codePage, DWORD flags) -> std::u16string {
+        const int length = MultiByteToWideChar(codePage, flags, text.data(),
+                                               static_cast<int>(text.size()), nullptr, 0);
+        if (length <= 0)
+        {
+            return {};
+        }
+        std::u16string result(static_cast<std::size_t>(length), u'\0');
+        MultiByteToWideChar(codePage, flags, text.data(), static_cast<int>(text.size()),
+                            reinterpret_cast<wchar_t*>(result.data()), length);
+        return result;
+    };
+
+    std::u16string result = convert(CP_UTF8, MB_ERR_INVALID_CHARS);
+    return !result.empty() ? result : convert(CP_ACP, 0);
+}
+
+void CaptureKeyboardPromptStrings(std::string_view source)
+{
+    g_liveKeyboardPromptStrings.clear();
+    g_liveKeyboardPromptStringsLocated = false;
+    g_keyboardPromptLocalizationAllocation = nullptr;
+    g_liveKeyboardPromptLastLocateTick = 0;
+    g_liveKeyboardPromptLocateAttempts = 0;
+
+    std::size_t cursor = 0;
+    while (cursor < source.size())
+    {
+        const std::size_t newline = source.find('\n', cursor);
+        const std::size_t lineEnd = newline == std::string_view::npos ? source.size() : newline;
+        std::size_t contentEnd = lineEnd;
+        if (contentEnd > cursor && source[contentEnd - 1] == '\r')
+        {
+            --contentEnd;
+        }
+
+        const std::string_view line = source.substr(cursor, contentEnd - cursor);
+        const std::size_t closingBracket = line.find(']');
+        if (!line.empty() && line.front() == '[' && closingBracket != std::string_view::npos)
+        {
+            const std::string_view value = line.substr(closingBracket + 1);
+            const std::string transformed =
+                ReplaceKeyboardPromptTokens(value, g_keyboardPromptBaseBindings);
+            if (transformed != value &&
+                transformed.size() <= std::numeric_limits<char16_t>::max())
+            {
+                std::u16string wideValue = PromptTextToUtf16(transformed);
+                if (!wideValue.empty())
+                {
+                    g_liveKeyboardPromptStrings.push_back(
+                        {std::string(value), std::move(wideValue), {}, 0});
+                }
+            }
+        }
+        if (newline != std::string_view::npos)
+        {
+            cursor = newline + 1;
+        }
+        else
+        {
+            cursor = source.size();
+        }
+    }
+}
+
+bool IsWritablePromptMemory(DWORD protection)
+{
+    if ((protection & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
+    {
+        return false;
+    }
+    const DWORD baseProtection = protection & 0xFF;
+    return baseProtection == PAGE_READWRITE || baseProtection == PAGE_WRITECOPY ||
+           baseProtection == PAGE_EXECUTE_READWRITE ||
+           baseProtection == PAGE_EXECUTE_WRITECOPY;
+}
+
+void LocateLoadedKeyboardPromptStringsLocked()
+{
+    if (g_liveKeyboardPromptStringsLocated || g_liveKeyboardPromptStrings.empty())
+    {
+        return;
+    }
+
+    constexpr DWORD kLocateRetryIntervalMs = 1000;
+    constexpr std::uint32_t kMaximumLocateAttempts = 30;
+    const DWORD now = ::GetTickCount();
+    if (g_liveKeyboardPromptLocateAttempts >= kMaximumLocateAttempts ||
+        (g_liveKeyboardPromptLastLocateTick != 0 &&
+         now - g_liveKeyboardPromptLastLocateTick < kLocateRetryIntervalMs))
+    {
+        return;
+    }
+    g_liveKeyboardPromptLastLocateTick = now;
+    ++g_liveKeyboardPromptLocateAttempts;
+
+    SYSTEM_INFO systemInfo = {};
+    GetSystemInfo(&systemInfo);
+    std::uintptr_t address =
+        reinterpret_cast<std::uintptr_t>(systemInfo.lpMinimumApplicationAddress);
+    const std::uintptr_t maximumAddress =
+        reinterpret_cast<std::uintptr_t>(systemInfo.lpMaximumApplicationAddress);
+    void* localizationAllocation = nullptr;
+
+    const auto longest = std::max_element(
+        g_liveKeyboardPromptStrings.begin(), g_liveKeyboardPromptStrings.end(),
+        [](const LiveKeyboardPromptString& lhs, const LiveKeyboardPromptString& rhs) {
+            return lhs.sourceTextUtf16.size() < rhs.sourceTextUtf16.size();
+        });
+
+    while (address < maximumAddress)
+    {
+        MEMORY_BASIC_INFORMATION memory = {};
+        if (VirtualQuery(reinterpret_cast<const void*>(address), &memory, sizeof(memory)) == 0)
+        {
+            break;
+        }
+
+        const std::uintptr_t regionStart =
+            reinterpret_cast<std::uintptr_t>(memory.BaseAddress);
+        const std::uintptr_t regionEnd = regionStart + memory.RegionSize;
+        if (memory.State == MEM_COMMIT && memory.Type == MEM_PRIVATE &&
+            IsWritablePromptMemory(memory.Protect) &&
+            longest != g_liveKeyboardPromptStrings.end() &&
+            memory.RegionSize >= longest->sourceTextUtf16.size() * sizeof(char16_t))
+        {
+            auto* begin = reinterpret_cast<char16_t*>(regionStart);
+            auto* end = reinterpret_cast<char16_t*>(regionEnd);
+            auto* match = std::search(begin, end, longest->sourceTextUtf16.begin(),
+                                      longest->sourceTextUtf16.end());
+            while (match != end)
+            {
+                const std::size_t length = longest->sourceTextUtf16.size();
+                if (match != begin && static_cast<std::size_t>(match[-1]) == length &&
+                    length < static_cast<std::size_t>(end - match) &&
+                    match[length] == u'\0')
+                {
+                    localizationAllocation = memory.AllocationBase;
+                    break;
+                }
+                match = std::search(match + 1, end, longest->sourceTextUtf16.begin(),
+                                    longest->sourceTextUtf16.end());
+            }
+        }
+
+        if (localizationAllocation != nullptr)
+        {
+            break;
+        }
+
+        if (regionEnd <= address)
+        {
+            break;
+        }
+        address = regionEnd;
+    }
+
+    if (localizationAllocation == nullptr)
+    {
+        return;
+    }
+
+    std::size_t locatedCount = 0;
+    address = reinterpret_cast<std::uintptr_t>(systemInfo.lpMinimumApplicationAddress);
+    while (address < maximumAddress)
+    {
+        MEMORY_BASIC_INFORMATION memory = {};
+        if (VirtualQuery(reinterpret_cast<const void*>(address), &memory, sizeof(memory)) == 0)
+        {
+            break;
+        }
+        const std::uintptr_t regionStart =
+            reinterpret_cast<std::uintptr_t>(memory.BaseAddress);
+        const std::uintptr_t regionEnd = regionStart + memory.RegionSize;
+        if (memory.AllocationBase == localizationAllocation && memory.State == MEM_COMMIT &&
+            IsWritablePromptMemory(memory.Protect))
+        {
+            auto* begin = reinterpret_cast<char16_t*>(regionStart);
+            auto* end = reinterpret_cast<char16_t*>(regionEnd);
+            for (LiveKeyboardPromptString& prompt : g_liveKeyboardPromptStrings)
+            {
+                auto* match = begin;
+                while ((match = std::search(match, end, prompt.sourceTextUtf16.begin(),
+                                            prompt.sourceTextUtf16.end())) != end)
+                {
+                    const std::size_t capacity = prompt.sourceTextUtf16.size();
+                    if (match != begin && static_cast<std::size_t>(match[-1]) == capacity &&
+                        capacity < static_cast<std::size_t>(end - match) &&
+                        match[capacity] == u'\0')
+                    {
+                        prompt.loadedText.push_back({match, prompt.sourceTextUtf16});
+                        prompt.capacity = capacity;
+                        ++locatedCount;
+                    }
+                    ++match;
+                }
+            }
+        }
+        if (regionEnd <= address)
+        {
+            break;
+        }
+        address = regionEnd;
+    }
+
+    if (locatedCount != 0)
+    {
+        g_liveKeyboardPromptStringsLocated = true;
+        g_keyboardPromptLocalizationAllocation = localizationAllocation;
+        std::ostringstream message;
+        message << "Located " << locatedCount
+                << " live keyboard-prompt localization entries.";
+        Log(message.str());
+    }
+}
+
+void UpdateLoadedKeyboardPromptStringsLocked(const KeyboardScanCodeBindings& scanCodes)
+{
+    LocateLoadedKeyboardPromptStringsLocked();
+    if (!g_liveKeyboardPromptStringsLocated)
+    {
+        return;
+    }
+
+    KeyboardPromptBindings bindings = g_keyboardPromptBaseBindings;
+    ApplyKeyboardPromptScanCodeOverrides(bindings, scanCodes);
+    std::size_t updatedCount = 0;
+    for (LiveKeyboardPromptString& prompt : g_liveKeyboardPromptStrings)
+    {
+        const std::u16string updated = PromptTextToUtf16(
+            ReplaceKeyboardPromptTokens(prompt.sourceText, bindings));
+        if (updated.empty() || updated.size() > prompt.capacity)
+        {
+            continue;
+        }
+
+        for (LoadedKeyboardPromptString& loaded : prompt.loadedText)
+        {
+            const std::size_t allocationSize = (prompt.capacity + 2) * sizeof(char16_t);
+            if (!IsWritableMemoryRange(loaded.text - 1, allocationSize))
+            {
+                continue;
+            }
+            MEMORY_BASIC_INFORMATION memory = {};
+            if (VirtualQuery(loaded.text, &memory, sizeof(memory)) == 0 ||
+                memory.AllocationBase != g_keyboardPromptLocalizationAllocation ||
+                static_cast<std::size_t>(loaded.text[-1]) != loaded.currentText.size() ||
+                std::memcmp(loaded.text, loaded.currentText.data(),
+                            loaded.currentText.size() * sizeof(char16_t)) != 0)
+            {
+                continue;
+            }
+            loaded.text[-1] = static_cast<char16_t>(updated.size());
+            std::memcpy(loaded.text, updated.data(), updated.size() * sizeof(char16_t));
+            loaded.text[updated.size()] = u'\0';
+            loaded.currentText = updated;
+            ++updatedCount;
+        }
+    }
+
+    if (updatedCount != 0)
+    {
+        std::ostringstream message;
+        message << "Updated " << updatedCount
+                << " keyboard-prompt localization entries from live bindings.";
+        Log(message.str());
+    }
+}
+
+void SynchronizeLiveKeyboardBindings(void* manager)
+{
+    if (manager == nullptr ||
+        !IsReadableMemoryRange(static_cast<const std::uint8_t*>(manager) +
+                                   kBindingManagerEntryCountOffset,
+                               sizeof(std::uint32_t) + sizeof(void*)))
+    {
+        return;
+    }
+
+    std::uint32_t count = 0;
+    std::uint8_t* entries = nullptr;
+    std::memcpy(&count, static_cast<const std::uint8_t*>(manager) +
+                            kBindingManagerEntryCountOffset,
+                sizeof(count));
+    std::memcpy(&entries, static_cast<const std::uint8_t*>(manager) +
+                              kBindingManagerEntryArrayOffset,
+                sizeof(entries));
+    const std::size_t byteCount = static_cast<std::size_t>(count) * kBindingEntryStride;
+    if (count == 0 || count > kBindingEntryCountLimit || entries == nullptr ||
+        !IsReadableMemoryRange(entries, byteCount))
+    {
+        return;
+    }
+
+    KeyboardScanCodeBindings current;
+    for (std::uint32_t index = 0; index < count; ++index)
+    {
+        const std::uint8_t* entry =
+            entries + static_cast<std::size_t>(index) * kBindingEntryStride;
+        if (entry[1] == 0 && entry[2] == 0 && !current.contains(entry[0]))
+        {
+            current.emplace(entry[0], entry[kBindingEntryScanCodeOffset]);
+        }
+    }
+
+    if (current.empty())
+    {
+        return;
+    }
+
+    std::scoped_lock lock(g_keyboardPromptFileMutex);
+    if (current == g_liveKeyboardScanCodes && g_liveKeyboardPromptStringsLocated)
+    {
+        return;
+    }
+    if (current != g_liveKeyboardScanCodes)
+    {
+        std::ostringstream message;
+        message << "Live keyboard scan codes:";
+        for (std::uint8_t commandId = 4; commandId <= 10; ++commandId)
+        {
+            if (const auto match = current.find(commandId); match != current.end())
+            {
+                message << ' ' << static_cast<unsigned int>(commandId) << "=0x"
+                        << std::hex << std::uppercase << std::setw(2)
+                        << std::setfill('0') << static_cast<unsigned int>(match->second)
+                        << std::dec;
+            }
+        }
+        Log(message.str());
+    }
+    g_liveKeyboardScanCodes = std::move(current);
+    UpdateLoadedKeyboardPromptStringsLocked(g_liveKeyboardScanCodes);
+}
+
+void PollLiveKeyboardBindings()
+{
+    if (!g_config.enableKeyboardPromptLabels)
+    {
+        return;
+    }
+
+    const std::uintptr_t manager =
+        g_liveKeyboardBindingManager.load(std::memory_order_acquire);
+    if (manager == 0)
+    {
+        return;
+    }
+
+    constexpr DWORD pollIntervalMs = 100;
+    const DWORD now = ::GetTickCount();
+    DWORD previous =
+        g_liveKeyboardBindingLastPollTick.load(std::memory_order_relaxed);
+    if (now - previous < pollIntervalMs ||
+        !g_liveKeyboardBindingLastPollTick.compare_exchange_strong(
+            previous, now, std::memory_order_relaxed))
+    {
+        return;
+    }
+
+    SynchronizeLiveKeyboardBindings(reinterpret_cast<void*>(manager));
+}
+
+bool WriteKeyboardPromptLocalizationFile(const std::filesystem::path& path,
+                                         std::string_view text)
+{
+    if (g_originalCreateFileA == nullptr)
+    {
+        return false;
+    }
+
+    const std::string narrowPath = path.string();
+    HANDLE file = g_originalCreateFileA(narrowPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+                                        nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        return false;
+    }
+
+    DWORD written = 0;
+    const bool succeeded = text.size() <= std::numeric_limits<DWORD>::max() &&
+                           WriteFile(file, text.data(), static_cast<DWORD>(text.size()),
+                                     &written, nullptr) != FALSE &&
+                           written == text.size();
+    CloseHandle(file);
+    return succeeded;
+}
+
+std::optional<std::filesystem::path> PrepareKeyboardPromptLocalization(
+    const std::filesystem::path& requestedPath)
+{
+    if (!g_config.enableKeyboardPromptLabels || requestedPath.empty() ||
+        !IsLocalizedStringsFileName(requestedPath.filename().string()))
+    {
+        return std::nullopt;
+    }
+
+    std::error_code error;
+    std::filesystem::path sourcePath = requestedPath;
+    if (sourcePath.is_relative())
+    {
+        sourcePath = std::filesystem::absolute(sourcePath, error);
+        if (error)
+        {
+            return std::nullopt;
+        }
+    }
+
+    const std::filesystem::path generatedPath =
+        g_moduleDirectory / ("ShepherdPatch.keyboard." + sourcePath.filename().string());
+    if (sourcePath == g_keyboardPromptLocalizationPath &&
+        !g_liveKeyboardPromptStrings.empty() &&
+        std::filesystem::exists(generatedPath, error) && !error)
+    {
+        return generatedPath;
+    }
+
+    const auto sourceText = ReadTextFile(sourcePath);
+    const std::filesystem::path bindingsPath =
+        g_moduleDirectory.parent_path() / "Engine" / "binds_pc_mjs.cfg";
+    const auto bindingsText = ReadTextFile(bindingsPath);
+    if (!sourceText || !bindingsText)
+    {
+        return std::nullopt;
+    }
+
+    g_keyboardPromptBaseBindings = ParseKeyboardPromptBindings(*bindingsText);
+    if (g_keyboardPromptBaseBindings.empty())
+    {
+        return std::nullopt;
+    }
+
+    const std::string transformed =
+        ReplaceKeyboardPromptTokens(*sourceText, g_keyboardPromptBaseBindings);
+    if (transformed == *sourceText ||
+        !WriteKeyboardPromptLocalizationFile(generatedPath, transformed))
+    {
+        Log("Keyboard prompt localization generation failed; using the stock table.");
+        return std::nullopt;
+    }
+
+    CaptureKeyboardPromptStrings(*sourceText);
+    g_keyboardPromptLocalizationPath = std::move(sourcePath);
+    Log("Generated keyboard prompt localization table: " + generatedPath.string());
+    return generatedPath;
+}
+
+HANDLE WINAPI HookedCreateFileA(LPCSTR fileName, DWORD desiredAccess, DWORD shareMode,
+                                LPSECURITY_ATTRIBUTES securityAttributes,
+                                DWORD creationDisposition, DWORD flagsAndAttributes,
+                                HANDLE templateFile)
+{
+    if (g_originalCreateFileA == nullptr)
+    {
+        return INVALID_HANDLE_VALUE;
+    }
+
+    std::string redirectedPath;
+    if (fileName != nullptr && (desiredAccess & (GENERIC_WRITE | FILE_APPEND_DATA)) == 0)
+    {
+        std::scoped_lock lock(g_keyboardPromptFileMutex);
+        if (const auto generatedPath = PrepareKeyboardPromptLocalization(fileName))
+        {
+            redirectedPath = generatedPath->string();
+        }
+    }
+
+    HANDLE file = g_originalCreateFileA(redirectedPath.empty() ? fileName : redirectedPath.c_str(),
+                                        desiredAccess, shareMode, securityAttributes,
+                                        creationDisposition, flagsAndAttributes, templateFile);
+    if (file != INVALID_HANDLE_VALUE && fileName != nullptr && g_config.skipStartupLogos &&
+        g_startupLogoStreamHooksReady.load(std::memory_order_acquire) &&
+        (desiredAccess & (GENERIC_WRITE | FILE_APPEND_DATA)) == 0)
+    {
+        LARGE_INTEGER fileSize = {};
+        if (GetFileSizeEx(file, &fileSize) && fileSize.QuadPart >= 0 &&
+            IsSupportedGlobalPakPath(fileName,
+                                     static_cast<std::uint64_t>(fileSize.QuadPart)))
+        {
+            g_startupLogoPakHandle.store(reinterpret_cast<std::uintptr_t>(file),
+                                         std::memory_order_release);
+            Log("Startup-logo archive stream detected; timer patch armed.");
+        }
+    }
+    return file;
+}
+
+BOOL WINAPI HookedReadFile(HANDLE file, LPVOID buffer, DWORD bytesToRead,
+                           LPDWORD bytesRead, LPOVERLAPPED overlapped)
+{
+    if (g_originalReadFile == nullptr)
+    {
+        SetLastError(ERROR_INVALID_FUNCTION);
+        return FALSE;
+    }
+
+    std::uint64_t fileOffset = 0;
+    bool haveOffset = false;
+    const bool isLogoArchive = reinterpret_cast<std::uintptr_t>(file) ==
+                               g_startupLogoPakHandle.load(std::memory_order_acquire);
+    if (isLogoArchive)
+    {
+        if (overlapped != nullptr)
+        {
+            fileOffset = (static_cast<std::uint64_t>(overlapped->OffsetHigh) << 32) |
+                         overlapped->Offset;
+            haveOffset = true;
+        }
+        else
+        {
+            LARGE_INTEGER zero = {};
+            LARGE_INTEGER current = {};
+            if (SetFilePointerEx(file, zero, &current, FILE_CURRENT) && current.QuadPart >= 0)
+            {
+                fileOffset = static_cast<std::uint64_t>(current.QuadPart);
+                haveOffset = true;
+            }
+        }
+    }
+
+    const BOOL succeeded =
+        g_originalReadFile(file, buffer, bytesToRead, bytesRead, overlapped);
+    if (!succeeded || !isLogoArchive || !haveOffset || buffer == nullptr ||
+        bytesRead == nullptr || *bytesRead == 0)
+    {
+        return succeeded;
+    }
+
+    const StartupLogoPatchResult patch = PatchStartupLogoTimers(
+        fileOffset, std::span<std::uint8_t>(static_cast<std::uint8_t*>(buffer), *bytesRead));
+    if (patch.patchedBytes != 0)
+    {
+        const std::size_t total =
+            g_startupLogoPatchedByteCount.fetch_add(patch.patchedBytes,
+                                                    std::memory_order_relaxed) +
+            patch.patchedBytes;
+        std::ostringstream message;
+        message << "Startup-logo timers shortened in streamed archive data: +"
+                << patch.patchedBytes << ", total=" << total << "/16.";
+        Log(message.str());
+    }
+    if (patch.mismatchedBytes != 0 &&
+        !g_startupLogoMismatchLogged.exchange(true, std::memory_order_relaxed))
+    {
+        Log("Startup-logo timer patch rejected unexpected archive bytes.");
+    }
+    return succeeded;
+}
+
+BOOL WINAPI HookedCloseHandle(HANDLE handle)
+{
+    const std::uintptr_t closing = reinterpret_cast<std::uintptr_t>(handle);
+    std::uintptr_t tracked = g_startupLogoPakHandle.load(std::memory_order_acquire);
+    if (closing == tracked)
+    {
+        g_startupLogoPakHandle.compare_exchange_strong(
+            tracked, 0, std::memory_order_acq_rel);
+    }
+    return g_originalCloseHandle != nullptr ? g_originalCloseHandle(handle) : FALSE;
+}
+
+const char* __fastcall HookedPromptResourceResolver(void* manager, void* /*reserved*/,
+                                                    std::uint32_t commandId,
+                                                    std::uint32_t alternateIcon)
+{
+    g_liveKeyboardBindingManager.store(reinterpret_cast<std::uintptr_t>(manager),
+                                       std::memory_order_release);
+    SynchronizeLiveKeyboardBindings(manager);
+    std::uint32_t resolvedCommandId = commandId;
+    const char* resource = g_originalPromptResourceResolver != nullptr
+                               ? g_originalPromptResourceResolver(manager, commandId,
+                                                                  alternateIcon)
+                               : nullptr;
+    const auto resourceText = TryReadPromptResourceText(resource);
+    if (g_originalPromptResourceResolver != nullptr)
+    {
+        if (const char* overrideResource = ResolvePcPromptResourceOverride(commandId);
+            overrideResource != nullptr)
+        {
+            resource = overrideResource;
+        }
+        else
+        {
+            resolvedCommandId = ResolvePcPromptCommand(
+                commandId, resourceText ? std::string_view(*resourceText) : std::string_view{});
+            if (resolvedCommandId != commandId)
+            {
+                resource =
+                    g_originalPromptResourceResolver(manager, resolvedCommandId, alternateIcon);
+            }
+        }
+    }
+
+    const std::uint64_t requestKey = (static_cast<std::uint64_t>(commandId) << 32) |
+                                     static_cast<std::uint64_t>(alternateIcon);
+    bool shouldLog = false;
+    {
+        std::scoped_lock lock(g_timingDiagnosticsMutex);
+        shouldLog = g_loggedPromptResourceRequests.insert(requestKey).second;
+    }
+    if (shouldLog)
+    {
+        std::ostringstream message;
+        message << "Prompt resource request: command=" << commandId
+                << ", commandLow=" << (commandId & 0xFFU)
+                << ", resolvedCommand=" << resolvedCommandId
+                << ", alternateIcon=" << alternateIcon
+                << ", resource=" << FormatAddress(reinterpret_cast<std::uintptr_t>(resource));
+        if (const auto finalResourceText = TryReadPromptResourceText(resource))
+        {
+            message << ", text=\"" << *finalResourceText << '"';
+        }
+        Log(message.str());
+    }
+
+    return resource;
+}
+
 void ApplyConfiguredEngineVarsOverrides()
 {
     if (!g_config.synchronizeEngineVars)
@@ -2208,7 +2914,9 @@ void LogPatchConfigSnapshot()
             << ", preciseSleep=" << g_config.enablePreciseSleepShim
             << ", borderless=" << g_config.forceBorderless
             << ", rawMouse=" << g_config.enableRawMouseInput
-            << ", highResolutionUi=" << g_config.enableHighResolutionUiFix;
+            << ", highResolutionUi=" << g_config.enableHighResolutionUiFix
+            << ", keyboardPromptLabels=" << g_config.enableKeyboardPromptLabels
+            << ", skipStartupLogos=" << g_config.skipStartupLogos;
     Log(message.str());
 }
 
@@ -2823,6 +3531,9 @@ HRESULT STDMETHODCALLTYPE HookedDirectInputSetCooperativeLevelW(IDirectInputDevi
                                                                 HWND window,
                                                                 DWORD flags);
 void __fastcall HookedEngineSettingsInit(void* settings);
+const char* __fastcall HookedPromptResourceResolver(void* manager, void* reserved,
+                                                    std::uint32_t commandId,
+                                                    std::uint32_t alternateIcon);
 void __cdecl HookedEngineSleepEx(float milliseconds, BOOL alertable);
 void __fastcall HookedSchedulerLoopUpdate(void* objectPointer, void* reserved,
                                           float deltaSeconds);
@@ -5710,6 +6421,76 @@ bool InstallEngineHooks(HMODULE engineModule)
     return true;
 }
 
+bool InstallEngineFileHooks(HMODULE engineModule)
+{
+    if ((!g_config.enableKeyboardPromptLabels && !g_config.skipStartupLogos) ||
+        engineModule == nullptr)
+    {
+        return false;
+    }
+
+    if (!InstallIatHook(engineModule, "kernel32.dll", "CreateFileA",
+                        reinterpret_cast<void*>(&HookedCreateFileA),
+                        reinterpret_cast<void**>(&g_originalCreateFileA)))
+    {
+        Log("Failed to install keyboard prompt localization hook.");
+        return false;
+    }
+
+    Log("Engine file-open hook installed.");
+
+    if (g_config.skipStartupLogos)
+    {
+        const bool readInstalled = InstallIatHook(
+            engineModule, "kernel32.dll", "ReadFile",
+            reinterpret_cast<void*>(&HookedReadFile),
+            reinterpret_cast<void**>(&g_originalReadFile));
+        const bool closeInstalled = InstallIatHook(
+            engineModule, "kernel32.dll", "CloseHandle",
+            reinterpret_cast<void*>(&HookedCloseHandle),
+            reinterpret_cast<void**>(&g_originalCloseHandle));
+        if (readInstalled && closeInstalled)
+        {
+            g_startupLogoStreamHooksReady.store(true, std::memory_order_release);
+            Log("Startup-logo streamed archive hooks installed.");
+        }
+        else
+        {
+            Log("Startup-logo skip disabled: archive stream hooks were incomplete.");
+        }
+    }
+
+    if (!g_config.enableKeyboardPromptLabels)
+    {
+        return true;
+    }
+
+    Log("Keyboard prompt localization hook installed.");
+
+    auto* resolverAddress = reinterpret_cast<void*>(
+        reinterpret_cast<std::uintptr_t>(engineModule) + kPromptResourceResolverRva);
+    if (!MatchesCodeSignature(resolverAddress, {0xA1},
+                              "Prompt resource resolver opcode") ||
+        !MatchesCodeSignature(static_cast<std::uint8_t*>(resolverAddress) + 5,
+                              {0x83, 0xEC, 0x0C},
+                              "Prompt resource resolver stack prologue"))
+    {
+        Log("Live input binding capture disabled: prompt resolver signature mismatch.");
+        return true;
+    }
+
+    if (!InstallRelativeJumpDetour(
+            resolverAddress, 8, reinterpret_cast<void*>(&HookedPromptResourceResolver),
+            reinterpret_cast<void**>(&g_originalPromptResourceResolver)))
+    {
+        Log("Live input binding capture disabled: prompt resolver hook failed.");
+        return true;
+    }
+
+    Log("Live input binding capture hook installed.");
+    return true;
+}
+
 bool InstallPreciseSleepHook(HMODULE engineModule)
 {
     if (!g_config.enablePreciseSleepShim || engineModule == nullptr)
@@ -6208,6 +6989,7 @@ bool InstallHooks()
     ResolveSchedulerTimingPointers(engineModule);
 
     bool installedAnyHook = false;
+    installedAnyHook |= InstallEngineFileHooks(engineModule);
     installedAnyHook |= InstallEngineHooks(engineModule);
     installedAnyHook |= InstallPreciseSleepHook(engineModule);
     installedAnyHook |= InstallSchedulerLoopUpdateHook(engineModule);

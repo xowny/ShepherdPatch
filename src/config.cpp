@@ -123,6 +123,11 @@ Config ParseConfig(std::string_view text)
             config.enableHighResolutionUiFix =
                 ParseBoolValue(value, config.enableHighResolutionUiFix);
         }
+        else if (key == "EnableKeyboardPromptLabels")
+        {
+            config.enableKeyboardPromptLabels =
+                ParseBoolValue(value, config.enableKeyboardPromptLabels);
+        }
         else if (key == "ForceBorderless")
         {
             config.forceBorderless = ParseBoolValue(value, config.forceBorderless);
@@ -161,6 +166,10 @@ Config ParseConfig(std::string_view text)
         {
             config.enableFrameRateUnlock =
                 ParseBoolValue(value, config.enableFrameRateUnlock);
+        }
+        else if (key == "SkipStartupLogos")
+        {
+            config.skipStartupLogos = ParseBoolValue(value, config.skipStartupLogos);
         }
         else if (key == "RawMouseSensitivity")
         {
