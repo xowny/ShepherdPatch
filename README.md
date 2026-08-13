@@ -5,7 +5,7 @@
 
 ShepherdPatch is a modernization and compatibility patch for the PC version of Silent Hill Homecoming.
 
-It focuses on improving how the game behaves on modern Windows systems while preserving the original game experience.
+It focuses on improving how the game behaves on modern Windows systems while preserving the original experience.
 
 ![image alt](https://github.com/xowny/ShepherdPatch/blob/main/JZv9u4i.png)
 
