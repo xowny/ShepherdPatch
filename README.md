@@ -5,7 +5,7 @@
 
 ShepherdPatch is a modernization and compatibility patch for the PC version of Silent Hill Homecoming.
 
-It focuses on improving how the game behaves on modern Windows systems while preserving the original experience.
+It focuses on improving how the game behaves on modern systems while preserving the original experience.
 
 ![image alt](https://github.com/xowny/ShepherdPatch/blob/main/JZv9u4i.png)
 
@@ -22,7 +22,7 @@ Nexus Mods: https://www.nexusmods.com/silenthillhomecoming/mods/10
 - Readable keyboard and mouse prompt labels with live keyboard-rebind updates
 - Safer device reset and windowed recovery behavior
 - Legacy timer, thread, and input hardening
-- Reduced menu movie stutter for known Bink menu-loop playback issues
+- Reduced menu movie stutter and playback issues
 - Optional startup-logo skip that leaves the game archives unchanged on disk
 - Crash dump generation for troubleshooting
 - Standalone WinUI configurator with a game-folder selector
@@ -40,7 +40,6 @@ Nexus Mods: https://www.nexusmods.com/silenthillhomecoming/mods/10
 ## Notes
 
 - This repository contains source code only.
-- Build outputs, local scratch data, and packaged binaries are intentionally excluded.
 
 ## Target Game
 
