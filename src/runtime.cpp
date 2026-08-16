@@ -1064,11 +1064,18 @@ void InstallSwapChainPresentHook(IDirect3DDevice9* device)
         return;
     }
 
+    g_lastSwapChainAddress = reinterpret_cast<std::uintptr_t>(swapChain);
+    if (ReadVtableEntryAddress(swapChain, kSwapChainPresentVtableIndex) ==
+        reinterpret_cast<std::uintptr_t>(&HookedSwapChainPresent))
+    {
+        ReleaseNoexcept(swapChain);
+        return;
+    }
+
     const bool installed =
         TryPatchVtableEntrySafe(swapChain, kSwapChainPresentVtableIndex,
                                 reinterpret_cast<void*>(&HookedSwapChainPresent),
                                 reinterpret_cast<void**>(&g_originalSwapChainPresent));
-    g_lastSwapChainAddress = reinterpret_cast<std::uintptr_t>(swapChain);
     g_lastOriginalSwapChainPresentAddress =
         reinterpret_cast<std::uintptr_t>(g_originalSwapChainPresent);
     ReleaseNoexcept(swapChain);
@@ -1101,7 +1108,9 @@ bool InstallDeviceExHooks(IDirect3DDevice9* device)
     }
 
     bool installedAnyHook = false;
-    if (PatchVtableEntry(deviceEx, kPresentExVtableIndex,
+    if (ReadVtableEntryAddress(deviceEx, kPresentExVtableIndex) !=
+            reinterpret_cast<std::uintptr_t>(&HookedPresentEx) &&
+        PatchVtableEntry(deviceEx, kPresentExVtableIndex,
                          reinterpret_cast<void*>(&HookedPresentEx),
                          reinterpret_cast<void**>(&g_originalPresentEx)))
     {
@@ -1117,7 +1126,9 @@ bool InstallDeviceExHooks(IDirect3DDevice9* device)
         installedAnyHook = true;
     }
 
-    if (PatchVtableEntry(deviceEx, kResetExVtableIndex,
+    if (ReadVtableEntryAddress(deviceEx, kResetExVtableIndex) !=
+            reinterpret_cast<std::uintptr_t>(&HookedResetEx) &&
+        PatchVtableEntry(deviceEx, kResetExVtableIndex,
                          reinterpret_cast<void*>(&HookedResetEx),
                          reinterpret_cast<void**>(&g_originalResetEx)))
     {
