@@ -163,6 +163,9 @@ constexpr std::size_t kDirectInputSetCooperativeLevelVtableIndex = 13;
 constexpr std::size_t kRelativeJumpLength = 5;
 constexpr std::uintptr_t kEngineSettingsInitRva = 0x00A27970;
 constexpr std::uintptr_t kPromptResourceResolverRva = 0x00986360;
+constexpr std::uintptr_t kLoadingEffectBufferUpdateRva = 0x004EC15F;
+constexpr std::uintptr_t kLoadingEffectBufferContinueRva = 0x004EC166;
+constexpr std::uintptr_t kLoadingEffectBufferCleanupRva = 0x004EC2BA;
 constexpr std::uintptr_t kLegacyFramePacingTimerCallerRva = 0x00A436F6;
 constexpr std::uintptr_t kEngineSleepExRva = 0x0080BAC0;
 constexpr std::uintptr_t kHashStringRva = 0x0088B6A0;
@@ -288,6 +291,8 @@ SetTransformFn g_originalSetTransform = nullptr;
 SetViewportFn g_originalSetViewport = nullptr;
 EngineSettingsInitFn g_originalEngineSettingsInit = nullptr;
 PromptResourceResolverFn g_originalPromptResourceResolver = nullptr;
+std::uintptr_t g_loadingEffectBufferContinueAddress = 0;
+std::uintptr_t g_loadingEffectBufferCleanupAddress = 0;
 EngineSleepExFn g_originalEngineSleepEx = nullptr;
 SchedulerLoopUpdateFn g_originalSchedulerLoopUpdate = nullptr;
 GameplayUpdateFn g_originalGameplayUpdate = nullptr;
@@ -2793,6 +2798,26 @@ const char* __fastcall HookedPromptResourceResolver(void* manager, void* /*reser
     return resource;
 }
 
+#if defined(_M_IX86)
+__declspec(naked) void HookedLoadingEffectBufferUpdate()
+{
+    __asm
+    {
+        cmp dword ptr [esi], 0
+        je missingBuffer
+
+        // Replay the two instructions replaced by the detour.
+        movzx eax, byte ptr [esi + 64h]
+        fld dword ptr [edi + 10h]
+        jmp dword ptr [g_loadingEffectBufferContinueAddress]
+
+    missingBuffer:
+        // Use the function's existing cleanup path before the displaced FLD.
+        jmp dword ptr [g_loadingEffectBufferCleanupAddress]
+    }
+}
+#endif
+
 void ApplyConfiguredEngineVarsOverrides()
 {
     if (!g_config.synchronizeEngineVars)
@@ -3745,8 +3770,18 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
         Log(message.str());
     }
 
+    // Homecoming uses one D3D9 device from gameplay and loading threads.
+    const DWORD protectedBehaviorFlags = behaviorFlags | D3DCREATE_MULTITHREADED;
+    if (protectedBehaviorFlags != behaviorFlags)
+    {
+        std::ostringstream message;
+        message << "CreateDevice enabled D3D multithread protection: flags=0x"
+                << std::hex << behaviorFlags << "->0x" << protectedBehaviorFlags;
+        Log(message.str());
+    }
+
     HRESULT hr = g_originalCreateDevice(direct3d, adapter, deviceType, focusWindow,
-                                        behaviorFlags, paramsForCall, returnedDevice);
+                                        protectedBehaviorFlags, paramsForCall, returnedDevice);
 
     if (FAILED(hr) && presentationParameters != nullptr && g_config.enableSafeResolutionChanges &&
         g_config.retryResetInWindowedMode)
@@ -3759,8 +3794,8 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
             BuildRetryResetParams(ToPresentParams(retryParams), g_config);
         ApplyPresentParams(retry, retryParams);
 
-        hr = g_originalCreateDevice(direct3d, adapter, deviceType, focusWindow, behaviorFlags,
-                                    &retryParams, returnedDevice);
+        hr = g_originalCreateDevice(direct3d, adapter, deviceType, focusWindow,
+                                    protectedBehaviorFlags, &retryParams, returnedDevice);
         Log("CreateDevice retry attempted, result=" + FormatHr(hr));
         if (SUCCEEDED(hr))
         {
@@ -3893,9 +3928,18 @@ HRESULT STDMETHODCALLTYPE HookedCreateDeviceEx(IDirect3D9Ex* direct3d, UINT adap
         Log(message.str());
     }
 
+    const DWORD protectedBehaviorFlags = behaviorFlags | D3DCREATE_MULTITHREADED;
+    if (protectedBehaviorFlags != behaviorFlags)
+    {
+        std::ostringstream message;
+        message << "CreateDeviceEx enabled D3D multithread protection: flags=0x"
+                << std::hex << behaviorFlags << "->0x" << protectedBehaviorFlags;
+        Log(message.str());
+    }
+
     HRESULT hr = g_originalCreateDeviceEx(direct3d, adapter, deviceType, focusWindow,
-                                          behaviorFlags, paramsForCall, fullscreenDisplayMode,
-                                          returnedDevice);
+                                          protectedBehaviorFlags, paramsForCall,
+                                          fullscreenDisplayMode, returnedDevice);
 
     if (FAILED(hr) && presentationParameters != nullptr && g_config.enableSafeResolutionChanges &&
         g_config.retryResetInWindowedMode)
@@ -3908,8 +3952,9 @@ HRESULT STDMETHODCALLTYPE HookedCreateDeviceEx(IDirect3D9Ex* direct3d, UINT adap
             BuildRetryResetParams(ToPresentParams(retryParams), g_config, true);
         ApplyPresentParams(retry, retryParams);
 
-        hr = g_originalCreateDeviceEx(direct3d, adapter, deviceType, focusWindow, behaviorFlags,
-                                      &retryParams, nullptr, returnedDevice);
+        hr = g_originalCreateDeviceEx(direct3d, adapter, deviceType, focusWindow,
+                                      protectedBehaviorFlags, &retryParams, nullptr,
+                                      returnedDevice);
         Log("CreateDeviceEx retry attempted, result=" + FormatHr(hr));
         if (SUCCEEDED(hr))
         {
@@ -6491,6 +6536,47 @@ bool InstallEngineFileHooks(HMODULE engineModule)
     return true;
 }
 
+bool ApplyLoadingEffectBufferGuard(HMODULE engineModule)
+{
+    if (engineModule == nullptr)
+    {
+        return false;
+    }
+
+#if defined(_M_IX86)
+    const auto moduleBase = reinterpret_cast<std::uintptr_t>(engineModule);
+    auto* const targetAddress =
+        reinterpret_cast<void*>(moduleBase + kLoadingEffectBufferUpdateRva);
+
+    // Match from the wrapper-null check through the first buffer write.
+    if (!MatchesCodeSignature(
+            reinterpret_cast<const std::uint8_t*>(targetAddress) - 8,
+            {0x3B, 0xF3, 0x0F, 0x84, 0x5B, 0x01, 0x00, 0x00,
+             0x0F, 0xB6, 0x46, 0x64, 0xD9, 0x47, 0x10, 0xF3,
+             0x0F, 0x10, 0x47, 0x14, 0x8B, 0x0E},
+            "Loading effect buffer guard"))
+    {
+        return false;
+    }
+
+    g_loadingEffectBufferContinueAddress = moduleBase + kLoadingEffectBufferContinueRva;
+    g_loadingEffectBufferCleanupAddress = moduleBase + kLoadingEffectBufferCleanupRva;
+
+    if (!InstallRelativeJumpDetour(targetAddress, 7,
+                                   reinterpret_cast<void*>(&HookedLoadingEffectBufferUpdate),
+                                   nullptr))
+    {
+        Log("Loading effect buffer guard failed to install.");
+        return false;
+    }
+
+    Log("Loading effect buffer guard installed: null render buffers use the stock cleanup path.");
+    return true;
+#else
+    return false;
+#endif
+}
+
 bool InstallPreciseSleepHook(HMODULE engineModule)
 {
     if (!g_config.enablePreciseSleepShim || engineModule == nullptr)
@@ -6985,6 +7071,7 @@ bool InstallHooks()
     LogModuleIdentity(engineModule, "g_SilentHill.sgl");
     ApplyStockMainFrameInterval(engineModule);
     ApplyHighResolutionUiFix(engineModule);
+    ApplyLoadingEffectBufferGuard(engineModule);
     ResolveEngineFrameBudgetPointers(engineModule);
     ResolveSchedulerTimingPointers(engineModule);
 
