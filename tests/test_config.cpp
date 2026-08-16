@@ -27,6 +27,7 @@ TEST_CASE(ParseConfigReadsBoolAndIntegerOverrides)
         "DisableVsync = true\n"
         "DisableLegacyPeriodicIconicTimer = false\n"
         "ReduceLegacyWaitableTimerPolling = false\n"
+        "ImproveAudioThreadScheduling = true\n"
         "HardenLegacyGraphicsRecovery = false\n"
         "HardenLegacyThreadWrapper = false\n"
         "HardenDirectInputMouseDevice = false\n"
@@ -68,6 +69,7 @@ TEST_CASE(ParseConfigReadsBoolAndIntegerOverrides)
     CHECK_TRUE(config.disableVsync);
     CHECK_TRUE(!config.disableLegacyPeriodicIconicTimer);
     CHECK_TRUE(!config.reduceLegacyWaitableTimerPolling);
+    CHECK_TRUE(config.improveAudioThreadScheduling);
     CHECK_TRUE(!config.hardenLegacyGraphicsRecovery);
     CHECK_TRUE(!config.hardenLegacyThreadWrapper);
     CHECK_TRUE(!config.hardenDirectInputMouseDevice);
@@ -118,6 +120,7 @@ TEST_CASE(ParseConfigUsesConservativeDefaultsWhenFileIsMissing)
     CHECK_TRUE(!config.disableVsync);
     CHECK_TRUE(config.disableLegacyPeriodicIconicTimer);
     CHECK_TRUE(!config.reduceLegacyWaitableTimerPolling);
+    CHECK_TRUE(!config.improveAudioThreadScheduling);
     CHECK_TRUE(config.hardenLegacyGraphicsRecovery);
     CHECK_TRUE(config.hardenLegacyThreadWrapper);
     CHECK_TRUE(config.hardenDirectInputMouseDevice);

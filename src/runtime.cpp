@@ -169,6 +169,8 @@ constexpr std::uintptr_t kHashStringRva = 0x0088B6A0;
 constexpr std::uintptr_t kEngineFramePacingSleepCallerRva = 0x00A4CCEB;
 constexpr std::uintptr_t kLegacyWaitableTimerWorkerSleepReturnRva = 0x00822B78;
 constexpr std::uintptr_t kLegacyWaitableTimerSetupReturnRva = 0x00822CFB;
+constexpr std::uintptr_t kStdAudioWorkerSleepInstructionRva = 0x00822B70;
+constexpr std::uintptr_t kStdAudioThreadPriorityInstructionRva = 0x00822C5C;
 constexpr std::uintptr_t kLegacyThreadWrapperCreateReturnRva = 0x0080BCFC;
 constexpr std::uintptr_t kLegacyThreadWrapperTerminateReturnRva = 0x0080B7C2;
 constexpr std::uintptr_t kLegacyThreadWrapperResumeReturnRva = 0x0080B7DD;
@@ -467,7 +469,6 @@ std::atomic<HANDLE> g_legacyWaitableTimerWorkerHandle(nullptr);
 std::atomic<DWORD> g_stdAudioThreadId(0);
 std::atomic<std::uintptr_t> g_stdAudioRootObject(0);
 std::atomic<std::uintptr_t> g_stdAudioRouterVtable(0);
-CadenceTracker g_stdAudioWorkerSleepCadence;
 std::atomic<std::uint32_t> g_invalidRenderDeviceLogCount(0);
 std::atomic<std::uint32_t> g_binkOpenLogCount(0);
 std::atomic<std::uint32_t> g_binkPlaybackLogCount(0);
@@ -4500,7 +4501,6 @@ VOID WINAPI HookedEngineSleep(DWORD milliseconds)
         currentThreadId == stdAudioThreadId)
     {
         LogStdAudioWorkerTracking(milliseconds, waitableTimerWorkerPlan.useTrackedTimer);
-        LogRenderCadenceSample("StdAudio worker sleep", g_stdAudioWorkerSleepCadence);
     }
 
     if (waitableTimerWorkerPlan.useTrackedTimer && trackedWaitableTimerHandle != nullptr)
@@ -6491,6 +6491,45 @@ bool InstallEngineFileHooks(HMODULE engineModule)
     return true;
 }
 
+bool ApplyAudioThreadSchedulingFix(HMODULE engineModule)
+{
+    if (!g_config.improveAudioThreadScheduling || engineModule == nullptr)
+    {
+        return false;
+    }
+
+    auto* const moduleBase = reinterpret_cast<std::uint8_t*>(engineModule);
+    auto* const sleepInstruction = moduleBase + kStdAudioWorkerSleepInstructionRva;
+    auto* const priorityInstruction = moduleBase + kStdAudioThreadPriorityInstructionRva;
+    if (!MatchesCodeSignature(sleepInstruction, {0x6A, 0x01, 0xFF, 0x15},
+                              "StdAudio worker sleep") ||
+        !MatchesCodeSignature(priorityInstruction - 4,
+                              {0x6A, 0x00, 0x6A, 0x01, 0x6A, 0x02},
+                              "StdAudio thread priority"))
+    {
+        Log("Audio thread scheduling fix skipped: the stock instruction contexts did not match.");
+        return false;
+    }
+
+    constexpr std::size_t kPatchSpan =
+        (kStdAudioThreadPriorityInstructionRva + 2) - kStdAudioWorkerSleepInstructionRva;
+    DWORD oldProtection = 0;
+    if (VirtualProtect(sleepInstruction, kPatchSpan, PAGE_EXECUTE_READWRITE,
+                       &oldProtection) == FALSE)
+    {
+        Log("Audio thread scheduling fix skipped: target code was not writable.");
+        return false;
+    }
+
+    sleepInstruction[1] = 0x00;
+    priorityInstruction[1] = 0x03;
+    DWORD ignored = 0;
+    VirtualProtect(sleepInstruction, kPatchSpan, oldProtection, &ignored);
+    FlushInstructionCache(GetCurrentProcess(), sleepInstruction, kPatchSpan);
+    Log("Audio thread scheduling fix applied: StdAudio uses Sleep(0) at normal priority.");
+    return true;
+}
+
 bool InstallPreciseSleepHook(HMODULE engineModule)
 {
     if (!g_config.enablePreciseSleepShim || engineModule == nullptr)
@@ -6984,6 +7023,7 @@ bool InstallHooks()
     g_engineModule = engineModule;
     LogModuleIdentity(engineModule, "g_SilentHill.sgl");
     ApplyStockMainFrameInterval(engineModule);
+    ApplyAudioThreadSchedulingFix(engineModule);
     ApplyHighResolutionUiFix(engineModule);
     ResolveEngineFrameBudgetPointers(engineModule);
     ResolveSchedulerTimingPointers(engineModule);

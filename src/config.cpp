@@ -211,6 +211,11 @@ Config ParseConfig(std::string_view text)
             config.reduceLegacyWaitableTimerPolling =
                 ParseBoolValue(value, config.reduceLegacyWaitableTimerPolling);
         }
+        else if (key == "ImproveAudioThreadScheduling")
+        {
+            config.improveAudioThreadScheduling =
+                ParseBoolValue(value, config.improveAudioThreadScheduling);
+        }
         else if (key == "HardenLegacyGraphicsRecovery")
         {
             config.hardenLegacyGraphicsRecovery =
