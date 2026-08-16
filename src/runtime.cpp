@@ -612,6 +612,11 @@ double ResolveDiagnosticTargetFrameDurationMs()
 
 void LogSchedulerLoopTargets(void* objectPointer)
 {
+    if (!g_config.enableDiagnostics)
+    {
+        return;
+    }
+
     std::uintptr_t vtableAddress = 0;
     if (!TryReadPointerValue(objectPointer, vtableAddress))
     {
@@ -636,6 +641,11 @@ void LogSchedulerLoopTargets(void* objectPointer)
 
 void LogSchedulerTimingSummary(double targetFrameMs)
 {
+    if (!g_config.enableDiagnostics)
+    {
+        return;
+    }
+
     const auto summary = ConsumeCadenceSummary(&g_schedulerTimingSummary,
                                                kSchedulerTimingSummaryInterval);
     if (!summary.has_value())
@@ -709,7 +719,7 @@ void LogSchedulerTimingSummary(double targetFrameMs)
 void LogRenderCadenceSample(const char* label, CadenceTracker& tracker,
                             double callDurationMs = -1.0)
 {
-    if (g_highPrecisionTimerState.frequency == 0)
+    if (!g_config.enableDiagnostics || g_highPrecisionTimerState.frequency == 0)
     {
         return;
     }
@@ -2771,6 +2781,7 @@ const char* __fastcall HookedPromptResourceResolver(void* manager, void* /*reser
     const std::uint64_t requestKey = (static_cast<std::uint64_t>(commandId) << 32) |
                                      static_cast<std::uint64_t>(alternateIcon);
     bool shouldLog = false;
+    if (g_config.enableDiagnostics)
     {
         std::scoped_lock lock(g_timingDiagnosticsMutex);
         shouldLog = g_loggedPromptResourceRequests.insert(requestKey).second;
@@ -2916,7 +2927,8 @@ void LogPatchConfigSnapshot()
             << ", rawMouse=" << g_config.enableRawMouseInput
             << ", highResolutionUi=" << g_config.enableHighResolutionUiFix
             << ", keyboardPromptLabels=" << g_config.enableKeyboardPromptLabels
-            << ", skipStartupLogos=" << g_config.skipStartupLogos;
+            << ", skipStartupLogos=" << g_config.skipStartupLogos
+            << ", diagnostics=" << g_config.enableDiagnostics;
     Log(message.str());
 }
 
@@ -3413,7 +3425,8 @@ std::shared_ptr<TrackedBinkMovieState> FindTrackedBinkMovieState(void* movieHand
 void RegisterTrackedBinkMovie(void* movieHandle, const std::string& moviePath,
                               std::uint32_t openFlags)
 {
-    if (movieHandle == nullptr || !ShouldTraceBinkPlayback(moviePath))
+    if (!g_config.enableDiagnostics || movieHandle == nullptr ||
+        !ShouldTraceBinkPlayback(moviePath))
     {
         return;
     }
@@ -3444,6 +3457,11 @@ std::string BuildTrackedBinkLabel(BinkTrackedFunction function, void* movieHandl
 void LogTrackedBinkCadenceSample(BinkTrackedFunction function, void* movieHandle,
                                  double callDurationMs = -1.0)
 {
+    if (!g_config.enableDiagnostics)
+    {
+        return;
+    }
+
     auto trackedMovie = FindTrackedBinkMovieState(movieHandle);
     if (trackedMovie == nullptr)
     {
@@ -4187,7 +4205,8 @@ void __cdecl HookedEngineSleepEx(float milliseconds, BOOL alertable)
     const std::uint32_t roundedMilliseconds =
         milliseconds > 0.0f ? static_cast<std::uint32_t>(milliseconds + 0.5f) : 0;
     const auto caller = reinterpret_cast<std::uintptr_t>(_ReturnAddress());
-    if (IsSuspiciousFramePacingIntervalMs(roundedMilliseconds) &&
+    if (g_config.enableDiagnostics &&
+        IsSuspiciousFramePacingIntervalMs(roundedMilliseconds) &&
         LogCallerOnce(g_loggedSleepCallers, caller))
     {
         std::ostringstream message;
@@ -4249,7 +4268,8 @@ void __cdecl HookedEngineSleepEx(float milliseconds, BOOL alertable)
             const bool logOutlier =
                 IsCadenceOutlier(measuredWorkElapsedMilliseconds, targetFrameMs) &&
                 sampleIndex < (kSchedulerTimingLogSampleLimit + kRenderCadenceOutlierLogLimit);
-            if (sampleIndex < kSchedulerTimingLogSampleLimit || logOutlier)
+            if (g_config.enableDiagnostics &&
+                (sampleIndex < kSchedulerTimingLogSampleLimit || logOutlier))
             {
                 std::ostringstream message;
                 message << "Scheduler sleep override "
@@ -4333,7 +4353,7 @@ MMRESULT WINAPI HookedTimeSetEvent(UINT delay, UINT resolution, LPTIMECALLBACK c
                                    DWORD_PTR user, UINT eventType)
 {
     const auto caller = reinterpret_cast<std::uintptr_t>(_ReturnAddress());
-    if (IsSuspiciousFramePacingIntervalMs(delay) &&
+    if (g_config.enableDiagnostics && IsSuspiciousFramePacingIntervalMs(delay) &&
         LogCallerOnce(g_loggedTimeSetEventCallers, caller))
     {
         std::ostringstream message;
@@ -4424,7 +4444,8 @@ BOOL WINAPI HookedSetWaitableTimer(HANDLE timer, const LARGE_INTEGER* dueTime, L
     const auto caller = reinterpret_cast<std::uintptr_t>(_ReturnAddress());
     const std::optional<std::uint32_t> dueTimeMs =
         dueTime != nullptr ? RelativeDueTimeToMilliseconds(dueTime->QuadPart) : std::nullopt;
-    if (((period > 0 && IsSuspiciousFramePacingIntervalMs(static_cast<std::uint32_t>(period))) ||
+    if (g_config.enableDiagnostics &&
+        ((period > 0 && IsSuspiciousFramePacingIntervalMs(static_cast<std::uint32_t>(period))) ||
          (dueTimeMs.has_value() && IsSuspiciousFramePacingIntervalMs(*dueTimeMs))) &&
         LogCallerOnce(g_loggedSetWaitableTimerCallers, caller))
     {
@@ -4851,9 +4872,10 @@ VOID WINAPI HookedShvSleep(DWORD milliseconds)
                                             g_config.targetFrameRate, milliseconds);
     const std::uint32_t sampleIndex =
         g_shvSleepLogCount.fetch_add(1, std::memory_order_relaxed);
-    if (sampleIndex < kSchedulerTimingLogSampleLimit ||
-        (adjustedMilliseconds != milliseconds &&
-         sampleIndex < (kSchedulerTimingLogSampleLimit + kRenderCadenceOutlierLogLimit)))
+    if (g_config.enableDiagnostics &&
+        (sampleIndex < kSchedulerTimingLogSampleLimit ||
+         (adjustedMilliseconds != milliseconds &&
+          sampleIndex < (kSchedulerTimingLogSampleLimit + kRenderCadenceOutlierLogLimit))))
     {
         std::ostringstream message;
         message << "shv.dll Sleep "
@@ -4885,9 +4907,10 @@ UINT_PTR WINAPI HookedShvSetTimer(HWND window, UINT_PTR timerId, UINT elapse,
                  1u);
     const std::uint32_t sampleIndex =
         g_shvSetTimerLogCount.fetch_add(1, std::memory_order_relaxed);
-    if (sampleIndex < kSchedulerTimingLogSampleLimit ||
-        (adjustedElapse != elapse &&
-         sampleIndex < (kSchedulerTimingLogSampleLimit + kRenderCadenceOutlierLogLimit)))
+    if (g_config.enableDiagnostics &&
+        (sampleIndex < kSchedulerTimingLogSampleLimit ||
+         (adjustedElapse != elapse &&
+          sampleIndex < (kSchedulerTimingLogSampleLimit + kRenderCadenceOutlierLogLimit))))
     {
         std::ostringstream message;
         message << "shv.dll SetTimer "
@@ -4963,7 +4986,10 @@ FARPROC WINAPI HookedShvGetProcAddress(HMODULE module, LPCSTR procName)
 void __fastcall HookedShvMainLoop(void* self, void* /*edx*/, std::uintptr_t arg1,
                                   std::uintptr_t arg2)
 {
-    g_shvMainLoopHitCount.fetch_add(1, std::memory_order_relaxed);
+    if (g_config.enableDiagnostics)
+    {
+        g_shvMainLoopHitCount.fetch_add(1, std::memory_order_relaxed);
+    }
     LogRenderCadenceSample("shv.dll MainLoop", g_shvMainLoopCadence);
 
     if (g_originalShvMainLoop != nullptr)
@@ -5521,8 +5547,12 @@ HRESULT STDMETHODCALLTYPE HookedPresent(IDirect3DDevice9* device, const RECT* so
     }
 
     LARGE_INTEGER startCounter = {};
-    const bool measuredStart = ::QueryPerformanceCounter(&startCounter) != FALSE;
-    g_devicePresentHitCount.fetch_add(1, std::memory_order_relaxed);
+    const bool measuredStart =
+        g_config.enableDiagnostics && ::QueryPerformanceCounter(&startCounter) != FALSE;
+    if (g_config.enableDiagnostics)
+    {
+        g_devicePresentHitCount.fetch_add(1, std::memory_order_relaxed);
+    }
     const HRESULT hr =
         originalPresent(device, sourceRect, destRect, destWindowOverride, dirtyRegion);
     double callDurationMs = -1.0;
@@ -5552,8 +5582,12 @@ HRESULT STDMETHODCALLTYPE HookedPresentEx(IDirect3DDevice9Ex* device, const RECT
     }
 
     LARGE_INTEGER startCounter = {};
-    const bool measuredStart = ::QueryPerformanceCounter(&startCounter) != FALSE;
-    g_devicePresentExHitCount.fetch_add(1, std::memory_order_relaxed);
+    const bool measuredStart =
+        g_config.enableDiagnostics && ::QueryPerformanceCounter(&startCounter) != FALSE;
+    if (g_config.enableDiagnostics)
+    {
+        g_devicePresentExHitCount.fetch_add(1, std::memory_order_relaxed);
+    }
     const HRESULT hr = g_originalPresentEx(device, sourceRect, destRect, destWindowOverride,
                                            dirtyRegion, flags);
     double callDurationMs = -1.0;
@@ -5594,8 +5628,12 @@ HRESULT STDMETHODCALLTYPE HookedSwapChainPresent(IDirect3DSwapChain9* swapChain,
     }
 
     LARGE_INTEGER startCounter = {};
-    const bool measuredStart = ::QueryPerformanceCounter(&startCounter) != FALSE;
-    g_swapChainPresentHitCount.fetch_add(1, std::memory_order_relaxed);
+    const bool measuredStart =
+        g_config.enableDiagnostics && ::QueryPerformanceCounter(&startCounter) != FALSE;
+    if (g_config.enableDiagnostics)
+    {
+        g_swapChainPresentHitCount.fetch_add(1, std::memory_order_relaxed);
+    }
     const HRESULT hr = originalSwapChainPresent(swapChain, sourceRect, destRect,
                                                 destWindowOverride, dirtyRegion, flags);
     double callDurationMs = -1.0;
@@ -5628,8 +5666,12 @@ HRESULT STDMETHODCALLTYPE HookedEndScene(IDirect3DDevice9* device)
     }
 
     LARGE_INTEGER startCounter = {};
-    const bool measuredStart = ::QueryPerformanceCounter(&startCounter) != FALSE;
-    g_endSceneHitCount.fetch_add(1, std::memory_order_relaxed);
+    const bool measuredStart =
+        g_config.enableDiagnostics && ::QueryPerformanceCounter(&startCounter) != FALSE;
+    if (g_config.enableDiagnostics)
+    {
+        g_endSceneHitCount.fetch_add(1, std::memory_order_relaxed);
+    }
     const HRESULT hr = originalEndScene(device);
     double callDurationMs = -1.0;
     if (measuredStart)
@@ -6288,7 +6330,8 @@ void __fastcall HookedSchedulerLoopUpdate(void* objectPointer, void* reserved, f
     const bool logOutlier =
         measuredElapsedSeconds > targetDeltaSeconds * 1.5f &&
         sampleIndex < (kSchedulerTimingLogSampleLimit + kRenderCadenceOutlierLogLimit);
-    if (sampleIndex < kSchedulerTimingLogSampleLimit || logOutlier)
+    if (g_config.enableDiagnostics &&
+        (sampleIndex < kSchedulerTimingLogSampleLimit || logOutlier))
     {
         std::ostringstream message;
         message << "Scheduler update override "
@@ -6309,6 +6352,7 @@ void __fastcall HookedSchedulerLoopUpdate(void* objectPointer, void* reserved, f
         Log(message.str());
     }
 
+    if (g_config.enableDiagnostics)
     {
         std::scoped_lock lock(g_timingDiagnosticsMutex);
         AccumulateCadenceSummary(&g_schedulerTimingSummary,

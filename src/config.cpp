@@ -162,6 +162,11 @@ Config ParseConfig(std::string_view text)
             config.enableCrashDumps =
                 ParseBoolValue(value, config.enableCrashDumps);
         }
+        else if (key == "EnableDiagnostics")
+        {
+            config.enableDiagnostics =
+                ParseBoolValue(value, config.enableDiagnostics);
+        }
         else if (key == "EnableFrameRateUnlock")
         {
             config.enableFrameRateUnlock =
