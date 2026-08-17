@@ -163,6 +163,8 @@ constexpr std::size_t kDirectInputSetCooperativeLevelVtableIndex = 13;
 constexpr std::size_t kRelativeJumpLength = 5;
 constexpr std::uintptr_t kEngineSettingsInitRva = 0x00A27970;
 constexpr std::uintptr_t kPromptResourceResolverRva = 0x00986360;
+constexpr std::uintptr_t kTipIconPromptOverrideBranchRva = 0x0090761F;
+constexpr std::uintptr_t kTextureItemPromptOverrideBranchRva = 0x0090770A;
 constexpr std::uintptr_t kLegacyFramePacingTimerCallerRva = 0x00A436F6;
 constexpr std::uintptr_t kEngineSleepExRva = 0x0080BAC0;
 constexpr std::uintptr_t kHashStringRva = 0x0088B6A0;
@@ -6558,6 +6560,63 @@ bool InstallEngineFileHooks(HMODULE engineModule)
     return true;
 }
 
+bool ApplyPromptIconConsumerFix(HMODULE engineModule)
+{
+    if (!g_config.enableKeyboardPromptLabels || engineModule == nullptr)
+    {
+        return false;
+    }
+
+#if defined(_M_IX86)
+    auto* const moduleBase = reinterpret_cast<std::uint8_t*>(engineModule);
+    auto* const tipIconBranch = moduleBase + kTipIconPromptOverrideBranchRva;
+    auto* const textureItemBranch = moduleBase + kTextureItemPromptOverrideBranchRva;
+
+    // Both consumers replace the resolver result with shv_buttonactionpc in
+    // keyboard/mouse mode. Keep the resolved resource unless it is null.
+    if (!MatchesCodeSignature(tipIconBranch - 0x19,
+                              {0x80, 0xB8, 0x78, 0x01, 0x00, 0x00, 0x00, 0x74,
+                               0x0E, 0xE8},
+                              "Tip icon prompt override context") ||
+        !MatchesCodeSignature(tipIconBranch - 4,
+                              {0x74, 0x09, 0x85, 0xED, 0x74, 0x05, 0xBD, 0xF0,
+                               0x81, 0x06, 0x11},
+                              "Tip icon prompt override branch") ||
+        !MatchesCodeSignature(textureItemBranch - 7,
+                              {0x80, 0xB9, 0x78, 0x01, 0x00, 0x00, 0x00, 0x74,
+                               0x0E, 0xE8},
+                              "Texture item prompt override context") ||
+        !MatchesCodeSignature(textureItemBranch + 0x0E,
+                              {0x74, 0x07, 0xBF, 0xF0, 0x81, 0x06, 0x11, 0xEB,
+                               0x04, 0x85, 0xFF},
+                              "Texture item prompt override branch"))
+    {
+        Log("Prompt icon consumer fix skipped: the stock instruction contexts did not match.");
+        return false;
+    }
+
+    const std::size_t patchSpan =
+        (kTextureItemPromptOverrideBranchRva + 2) - kTipIconPromptOverrideBranchRva;
+    DWORD oldProtection = 0;
+    if (VirtualProtect(tipIconBranch, patchSpan, PAGE_EXECUTE_READWRITE,
+                       &oldProtection) == FALSE)
+    {
+        Log("Prompt icon consumer fix skipped: target code was not writable.");
+        return false;
+    }
+
+    tipIconBranch[0] = 0x75;      // je -> jne: keep the resolved name unless null
+    textureItemBranch[1] = 0x15;  // je target -> null-checked consume path
+    DWORD ignored = 0;
+    VirtualProtect(tipIconBranch, patchSpan, oldProtection, &ignored);
+    FlushInstructionCache(GetCurrentProcess(), tipIconBranch, patchSpan);
+    Log("Prompt icon consumer fix applied: keyboard/mouse mode renders resolver-selected icons.");
+    return true;
+#else
+    return false;
+#endif
+}
+
 bool InstallPreciseSleepHook(HMODULE engineModule)
 {
     if (!g_config.enablePreciseSleepShim || engineModule == nullptr)
@@ -7057,6 +7116,7 @@ bool InstallHooks()
 
     bool installedAnyHook = false;
     installedAnyHook |= InstallEngineFileHooks(engineModule);
+    installedAnyHook |= ApplyPromptIconConsumerFix(engineModule);
     installedAnyHook |= InstallEngineHooks(engineModule);
     installedAnyHook |= InstallPreciseSleepHook(engineModule);
     installedAnyHook |= InstallSchedulerLoopUpdateHook(engineModule);
