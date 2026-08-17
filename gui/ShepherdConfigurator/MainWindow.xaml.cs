@@ -63,7 +63,7 @@ public sealed partial class MainWindow : Window
             new CardDefinition(DisplayCard, "Display", ["display", "resolution", "borderless", "dpi", "ultrawide", "hud", "refresh", "flip"], 7),
             new CardDefinition(InputCard, "Input", ["input", "mouse", "raw", "invert", "directinput", "sensitivity", "keyboard", "prompt", "label"], 5),
             new CardDefinition(FrameRateCard, "Frame Rate", ["frame", "fps", "vsync", "presentation", "wake", "rate"], 5),
-            new CardDefinition(StabilityCard, "Stability", ["stability", "timing", "sleep", "timer", "crash", "logging", "mmcss", "power"], 6),
+            new CardDefinition(StabilityCard, "Stability", ["stability", "timing", "sleep", "timer", "crash", "logging", "diagnostic", "mmcss", "power"], 7),
             new CardDefinition(AdvancedCard, "Advanced", ["advanced", "legacy", "thread", "pointer", "floating", "graphics", "timer"], 5),
             new CardDefinition(MoviesCard, "Movies", ["movie", "movies", "menu", "bink", "stutter", "startup", "logo", "skip"], 3)
         ];
@@ -188,6 +188,7 @@ public sealed partial class MainWindow : Window
             SetToggle(RequestHighResolutionTimerToggle, document, "RequestHighResolutionTimer");
             SetToggle(EnablePreciseSleepShimToggle, document, "EnablePreciseSleepShim");
             SetToggle(EnableCrashDumpsToggle, document, "EnableCrashDumps");
+            SetToggle(EnableDiagnosticsToggle, document, "EnableDiagnostics");
             SetToggle(SynchronizeEngineVarsToggle, document, "SynchronizeEngineVars");
             SetToggle(EnableGamesMmcssProfileToggle, document, "EnableGamesMmcssProfile");
             SetToggle(DisablePowerThrottlingToggle, document, "DisablePowerThrottling");
@@ -266,6 +267,7 @@ public sealed partial class MainWindow : Window
         SetValue(document, "RequestHighResolutionTimer", RequestHighResolutionTimerToggle.IsChecked == true);
         SetValue(document, "EnablePreciseSleepShim", EnablePreciseSleepShimToggle.IsChecked == true);
         SetValue(document, "EnableCrashDumps", EnableCrashDumpsToggle.IsChecked == true);
+        SetValue(document, "EnableDiagnostics", EnableDiagnosticsToggle.IsChecked == true);
         SetValue(document, "SynchronizeEngineVars", SynchronizeEngineVarsToggle.IsChecked == true);
         SetValue(document, "EnableGamesMmcssProfile", EnableGamesMmcssProfileToggle.IsChecked == true);
         SetValue(document, "DisablePowerThrottling", DisablePowerThrottlingToggle.IsChecked == true);

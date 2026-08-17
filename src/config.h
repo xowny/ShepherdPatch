@@ -20,6 +20,7 @@ struct Config
     bool enableRawMouseInput = true;
     bool enablePreciseSleepShim = true;
     bool enableCrashDumps = true;
+    bool enableDiagnostics = false;
     bool enableFrameRateUnlock = true;
     bool synchronizeEngineVars = true;
     float rawMouseSensitivity = 1.0f;
@@ -29,6 +30,7 @@ struct Config
     bool disableVsync = false;
     bool disableLegacyPeriodicIconicTimer = true;
     bool reduceLegacyWaitableTimerPolling = false;
+    bool improveAudioThreadScheduling = false;
     bool hardenLegacyGraphicsRecovery = true;
     bool hardenLegacyThreadWrapper = true;
     bool hardenDirectInputMouseDevice = true;
