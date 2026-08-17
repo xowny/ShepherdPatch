@@ -6612,12 +6612,6 @@ bool InstallEngineFileHooks(HMODULE engineModule)
 bool ApplyLoadingEffectBufferGuard(HMODULE engineModule)
 {
     if (engineModule == nullptr)
-bool ApplyAudioThreadSchedulingFix(HMODULE engineModule)
-{
-    if (!g_config.improveAudioThreadScheduling || engineModule == nullptr)
-bool ApplyPromptIconConsumerFix(HMODULE engineModule)
-{
-    if (!g_config.enableKeyboardPromptLabels || engineModule == nullptr)
     {
         return false;
     }
@@ -6650,6 +6644,19 @@ bool ApplyPromptIconConsumerFix(HMODULE engineModule)
     }
 
     Log("Loading effect buffer guard installed: null render buffers use the stock cleanup path.");
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool ApplyAudioThreadSchedulingFix(HMODULE engineModule)
+{
+    if (!g_config.improveAudioThreadScheduling || engineModule == nullptr)
+    {
+        return false;
+    }
+
     auto* const moduleBase = reinterpret_cast<std::uint8_t*>(engineModule);
     auto* const sleepInstruction = moduleBase + kStdAudioWorkerSleepInstructionRva;
     auto* const priorityInstruction = moduleBase + kStdAudioThreadPriorityInstructionRva;
@@ -6680,6 +6687,15 @@ bool ApplyPromptIconConsumerFix(HMODULE engineModule)
     FlushInstructionCache(GetCurrentProcess(), sleepInstruction, kPatchSpan);
     Log("Audio thread scheduling fix applied: StdAudio uses Sleep(0) at normal priority.");
     return true;
+}
+
+bool ApplyPromptIconConsumerFix(HMODULE engineModule)
+{
+    if (!g_config.enableKeyboardPromptLabels || engineModule == nullptr)
+    {
+        return false;
+    }
+
 #if defined(_M_IX86)
     auto* const moduleBase = reinterpret_cast<std::uint8_t*>(engineModule);
     auto* const tipIconBranch = moduleBase + kTipIconPromptOverrideBranchRva;
