@@ -163,6 +163,8 @@ constexpr std::size_t kDirectInputSetCooperativeLevelVtableIndex = 13;
 constexpr std::size_t kRelativeJumpLength = 5;
 constexpr std::uintptr_t kEngineSettingsInitRva = 0x00A27970;
 constexpr std::uintptr_t kPromptResourceResolverRva = 0x00986360;
+constexpr std::uintptr_t kTipIconPromptOverrideBranchRva = 0x0090761F;
+constexpr std::uintptr_t kTextureItemPromptOverrideBranchRva = 0x0090770A;
 constexpr std::uintptr_t kLegacyFramePacingTimerCallerRva = 0x00A436F6;
 constexpr std::uintptr_t kEngineSleepExRva = 0x0080BAC0;
 constexpr std::uintptr_t kHashStringRva = 0x0088B6A0;
@@ -613,6 +615,11 @@ double ResolveDiagnosticTargetFrameDurationMs()
 
 void LogSchedulerLoopTargets(void* objectPointer)
 {
+    if (!g_config.enableDiagnostics)
+    {
+        return;
+    }
+
     std::uintptr_t vtableAddress = 0;
     if (!TryReadPointerValue(objectPointer, vtableAddress))
     {
@@ -637,19 +644,16 @@ void LogSchedulerLoopTargets(void* objectPointer)
 
 void LogSchedulerTimingSummary(double targetFrameMs)
 {
+    if (!g_config.enableDiagnostics)
+    {
+        return;
+    }
+
     const auto summary = ConsumeCadenceSummary(&g_schedulerTimingSummary,
                                                kSchedulerTimingSummaryInterval);
     if (!summary.has_value())
     {
         return;
-    }
-
-    if (g_devicePresentHitCount.load(std::memory_order_relaxed) == 0 &&
-        g_devicePresentExHitCount.load(std::memory_order_relaxed) == 0 &&
-        g_swapChainPresentHitCount.load(std::memory_order_relaxed) == 0 &&
-        g_endSceneHitCount.load(std::memory_order_relaxed) == 0)
-    {
-        EnsureRenderHooksStillInstalled();
     }
 
     const std::uint32_t summaryIndex =
@@ -710,7 +714,7 @@ void LogSchedulerTimingSummary(double targetFrameMs)
 void LogRenderCadenceSample(const char* label, CadenceTracker& tracker,
                             double callDurationMs = -1.0)
 {
-    if (g_highPrecisionTimerState.frequency == 0)
+    if (!g_config.enableDiagnostics || g_highPrecisionTimerState.frequency == 0)
     {
         return;
     }
@@ -1063,11 +1067,18 @@ void InstallSwapChainPresentHook(IDirect3DDevice9* device)
         return;
     }
 
+    g_lastSwapChainAddress = reinterpret_cast<std::uintptr_t>(swapChain);
+    if (ReadVtableEntryAddress(swapChain, kSwapChainPresentVtableIndex) ==
+        reinterpret_cast<std::uintptr_t>(&HookedSwapChainPresent))
+    {
+        ReleaseNoexcept(swapChain);
+        return;
+    }
+
     const bool installed =
         TryPatchVtableEntrySafe(swapChain, kSwapChainPresentVtableIndex,
                                 reinterpret_cast<void*>(&HookedSwapChainPresent),
                                 reinterpret_cast<void**>(&g_originalSwapChainPresent));
-    g_lastSwapChainAddress = reinterpret_cast<std::uintptr_t>(swapChain);
     g_lastOriginalSwapChainPresentAddress =
         reinterpret_cast<std::uintptr_t>(g_originalSwapChainPresent);
     ReleaseNoexcept(swapChain);
@@ -1100,7 +1111,9 @@ bool InstallDeviceExHooks(IDirect3DDevice9* device)
     }
 
     bool installedAnyHook = false;
-    if (PatchVtableEntry(deviceEx, kPresentExVtableIndex,
+    if (ReadVtableEntryAddress(deviceEx, kPresentExVtableIndex) !=
+            reinterpret_cast<std::uintptr_t>(&HookedPresentEx) &&
+        PatchVtableEntry(deviceEx, kPresentExVtableIndex,
                          reinterpret_cast<void*>(&HookedPresentEx),
                          reinterpret_cast<void**>(&g_originalPresentEx)))
     {
@@ -1116,7 +1129,9 @@ bool InstallDeviceExHooks(IDirect3DDevice9* device)
         installedAnyHook = true;
     }
 
-    if (PatchVtableEntry(deviceEx, kResetExVtableIndex,
+    if (ReadVtableEntryAddress(deviceEx, kResetExVtableIndex) !=
+            reinterpret_cast<std::uintptr_t>(&HookedResetEx) &&
+        PatchVtableEntry(deviceEx, kResetExVtableIndex,
                          reinterpret_cast<void*>(&HookedResetEx),
                          reinterpret_cast<void**>(&g_originalResetEx)))
     {
@@ -2772,6 +2787,7 @@ const char* __fastcall HookedPromptResourceResolver(void* manager, void* /*reser
     const std::uint64_t requestKey = (static_cast<std::uint64_t>(commandId) << 32) |
                                      static_cast<std::uint64_t>(alternateIcon);
     bool shouldLog = false;
+    if (g_config.enableDiagnostics)
     {
         std::scoped_lock lock(g_timingDiagnosticsMutex);
         shouldLog = g_loggedPromptResourceRequests.insert(requestKey).second;
@@ -2917,7 +2933,8 @@ void LogPatchConfigSnapshot()
             << ", rawMouse=" << g_config.enableRawMouseInput
             << ", highResolutionUi=" << g_config.enableHighResolutionUiFix
             << ", keyboardPromptLabels=" << g_config.enableKeyboardPromptLabels
-            << ", skipStartupLogos=" << g_config.skipStartupLogos;
+            << ", skipStartupLogos=" << g_config.skipStartupLogos
+            << ", diagnostics=" << g_config.enableDiagnostics;
     Log(message.str());
 }
 
@@ -3414,7 +3431,8 @@ std::shared_ptr<TrackedBinkMovieState> FindTrackedBinkMovieState(void* movieHand
 void RegisterTrackedBinkMovie(void* movieHandle, const std::string& moviePath,
                               std::uint32_t openFlags)
 {
-    if (movieHandle == nullptr || !ShouldTraceBinkPlayback(moviePath))
+    if (!g_config.enableDiagnostics || movieHandle == nullptr ||
+        !ShouldTraceBinkPlayback(moviePath))
     {
         return;
     }
@@ -3445,6 +3463,11 @@ std::string BuildTrackedBinkLabel(BinkTrackedFunction function, void* movieHandl
 void LogTrackedBinkCadenceSample(BinkTrackedFunction function, void* movieHandle,
                                  double callDurationMs = -1.0)
 {
+    if (!g_config.enableDiagnostics)
+    {
+        return;
+    }
+
     auto trackedMovie = FindTrackedBinkMovieState(movieHandle);
     if (trackedMovie == nullptr)
     {
@@ -3579,7 +3602,8 @@ std::uint32_t __stdcall HookedBinkDoFrame(void* movieHandle)
 {
     LARGE_INTEGER startCounter = {};
     LARGE_INTEGER endCounter = {};
-    const bool measuredStart = ::QueryPerformanceCounter(&startCounter) != FALSE;
+    const bool measuredStart =
+        g_config.enableDiagnostics && ::QueryPerformanceCounter(&startCounter) != FALSE;
     const std::uint32_t result =
         g_originalBinkDoFrame != nullptr ? g_originalBinkDoFrame(movieHandle) : 0u;
 
@@ -3597,7 +3621,8 @@ std::uint32_t __stdcall HookedBinkNextFrame(void* movieHandle)
 {
     LARGE_INTEGER startCounter = {};
     LARGE_INTEGER endCounter = {};
-    const bool measuredStart = ::QueryPerformanceCounter(&startCounter) != FALSE;
+    const bool measuredStart =
+        g_config.enableDiagnostics && ::QueryPerformanceCounter(&startCounter) != FALSE;
     const std::uint32_t result =
         g_originalBinkNextFrame != nullptr ? g_originalBinkNextFrame(movieHandle) : 0u;
 
@@ -3623,7 +3648,8 @@ int __stdcall HookedBinkPause(void* movieHandle, int paused)
 {
     LARGE_INTEGER startCounter = {};
     LARGE_INTEGER endCounter = {};
-    const bool measuredStart = ::QueryPerformanceCounter(&startCounter) != FALSE;
+    const bool measuredStart =
+        g_config.enableDiagnostics && ::QueryPerformanceCounter(&startCounter) != FALSE;
     const int result = g_originalBinkPause != nullptr ? g_originalBinkPause(movieHandle, paused)
                                                       : 0;
 
@@ -3641,7 +3667,8 @@ int __stdcall HookedBinkWait(void* movieHandle)
 {
     LARGE_INTEGER startCounter = {};
     LARGE_INTEGER endCounter = {};
-    const bool measuredStart = ::QueryPerformanceCounter(&startCounter) != FALSE;
+    const bool measuredStart =
+        g_config.enableDiagnostics && ::QueryPerformanceCounter(&startCounter) != FALSE;
     const std::optional<std::string> zeroWaitMoviePath = FindZeroWaitMenuMoviePath(movieHandle);
     if (zeroWaitMoviePath.has_value())
     {
@@ -4188,7 +4215,8 @@ void __cdecl HookedEngineSleepEx(float milliseconds, BOOL alertable)
     const std::uint32_t roundedMilliseconds =
         milliseconds > 0.0f ? static_cast<std::uint32_t>(milliseconds + 0.5f) : 0;
     const auto caller = reinterpret_cast<std::uintptr_t>(_ReturnAddress());
-    if (IsSuspiciousFramePacingIntervalMs(roundedMilliseconds) &&
+    if (g_config.enableDiagnostics &&
+        IsSuspiciousFramePacingIntervalMs(roundedMilliseconds) &&
         LogCallerOnce(g_loggedSleepCallers, caller))
     {
         std::ostringstream message;
@@ -4244,37 +4272,41 @@ void __cdecl HookedEngineSleepEx(float milliseconds, BOOL alertable)
                                         measuredWorkElapsedMilliseconds,
                                         0.0f,
                                         originalSleepMilliseconds);
-            const std::uint32_t sampleIndex =
-                g_schedulerSleepLogCount.fetch_add(1, std::memory_order_relaxed);
-            const double targetFrameMs = ResolveDiagnosticTargetFrameDurationMs();
-            const bool logOutlier =
-                IsCadenceOutlier(measuredWorkElapsedMilliseconds, targetFrameMs) &&
-                sampleIndex < (kSchedulerTimingLogSampleLimit + kRenderCadenceOutlierLogLimit);
-            if (sampleIndex < kSchedulerTimingLogSampleLimit || logOutlier)
+            if (g_config.enableDiagnostics)
             {
-                std::ostringstream message;
-                message << "Scheduler sleep override "
-                        << (logOutlier && sampleIndex >= kSchedulerTimingLogSampleLimit
-                                ? "outlier "
-                                : "sample ")
-                        << (sampleIndex + 1)
-                        << ": sleep=" << originalSleepMilliseconds << "->"
-                        << schedulerPlan.sleepMilliseconds << "ms, measuredWork="
-                        << measuredWorkElapsedMilliseconds << "ms, wakeLead="
-                        << ((g_config.disableVsync ||
-                             ShouldUseImmediatePresentationInBorderless(g_config))
-                                ? 0.0f
-                                : g_config.presentWakeLeadMilliseconds)
-                        << "ms, target=";
-                if (g_config.targetFrameRate == 0)
+                const std::uint32_t sampleIndex =
+                    g_schedulerSleepLogCount.fetch_add(1, std::memory_order_relaxed);
+                const double targetFrameMs = ResolveDiagnosticTargetFrameDurationMs();
+                const bool logOutlier =
+                    IsCadenceOutlier(measuredWorkElapsedMilliseconds, targetFrameMs) &&
+                    sampleIndex <
+                        (kSchedulerTimingLogSampleLimit + kRenderCadenceOutlierLogLimit);
+                if (sampleIndex < kSchedulerTimingLogSampleLimit || logOutlier)
                 {
-                    message << "unlocked";
+                    std::ostringstream message;
+                    message << "Scheduler sleep override "
+                            << (logOutlier && sampleIndex >= kSchedulerTimingLogSampleLimit
+                                    ? "outlier "
+                                    : "sample ")
+                            << (sampleIndex + 1)
+                            << ": sleep=" << originalSleepMilliseconds << "->"
+                            << schedulerPlan.sleepMilliseconds << "ms, measuredWork="
+                            << measuredWorkElapsedMilliseconds << "ms, wakeLead="
+                            << ((g_config.disableVsync ||
+                                 ShouldUseImmediatePresentationInBorderless(g_config))
+                                    ? 0.0f
+                                    : g_config.presentWakeLeadMilliseconds)
+                            << "ms, target=";
+                    if (g_config.targetFrameRate == 0)
+                    {
+                        message << "unlocked";
+                    }
+                    else
+                    {
+                        message << g_config.targetFrameRate;
+                    }
+                    Log(message.str());
                 }
-                else
-                {
-                    message << g_config.targetFrameRate;
-                }
-                Log(message.str());
             }
 
             const PreciseSleepPlan precisePlan =
@@ -4334,7 +4366,7 @@ MMRESULT WINAPI HookedTimeSetEvent(UINT delay, UINT resolution, LPTIMECALLBACK c
                                    DWORD_PTR user, UINT eventType)
 {
     const auto caller = reinterpret_cast<std::uintptr_t>(_ReturnAddress());
-    if (IsSuspiciousFramePacingIntervalMs(delay) &&
+    if (g_config.enableDiagnostics && IsSuspiciousFramePacingIntervalMs(delay) &&
         LogCallerOnce(g_loggedTimeSetEventCallers, caller))
     {
         std::ostringstream message;
@@ -4425,7 +4457,8 @@ BOOL WINAPI HookedSetWaitableTimer(HANDLE timer, const LARGE_INTEGER* dueTime, L
     const auto caller = reinterpret_cast<std::uintptr_t>(_ReturnAddress());
     const std::optional<std::uint32_t> dueTimeMs =
         dueTime != nullptr ? RelativeDueTimeToMilliseconds(dueTime->QuadPart) : std::nullopt;
-    if (((period > 0 && IsSuspiciousFramePacingIntervalMs(static_cast<std::uint32_t>(period))) ||
+    if (g_config.enableDiagnostics &&
+        ((period > 0 && IsSuspiciousFramePacingIntervalMs(static_cast<std::uint32_t>(period))) ||
          (dueTimeMs.has_value() && IsSuspiciousFramePacingIntervalMs(*dueTimeMs))) &&
         LogCallerOnce(g_loggedSetWaitableTimerCallers, caller))
     {
@@ -4844,25 +4877,29 @@ BOOL WINAPI HookedTerminateThread(HANDLE threadHandle, DWORD exitCode)
 
 VOID WINAPI HookedShvSleep(DWORD milliseconds)
 {
-    g_shvSleepHitCount.fetch_add(1, std::memory_order_relaxed);
     const auto caller = reinterpret_cast<std::uintptr_t>(_ReturnAddress());
     const DWORD adjustedMilliseconds =
         ResolveThirdPartyFramePacingDelayMs(g_config.enableFrameRateUnlock,
                                             g_config.targetFrameRate, milliseconds);
-    const std::uint32_t sampleIndex =
-        g_shvSleepLogCount.fetch_add(1, std::memory_order_relaxed);
-    if (sampleIndex < kSchedulerTimingLogSampleLimit ||
-        (adjustedMilliseconds != milliseconds &&
-         sampleIndex < (kSchedulerTimingLogSampleLimit + kRenderCadenceOutlierLogLimit)))
+    if (g_config.enableDiagnostics)
     {
-        std::ostringstream message;
-        message << "shv.dll Sleep "
-                << ((adjustedMilliseconds != milliseconds && sampleIndex >= kSchedulerTimingLogSampleLimit)
-                        ? "override "
-                        : "sample ")
-                << (sampleIndex + 1) << ": " << milliseconds << "->"
-                << adjustedMilliseconds << "ms, caller=" << FormatAddress(caller);
-        Log(message.str());
+        g_shvSleepHitCount.fetch_add(1, std::memory_order_relaxed);
+        const std::uint32_t sampleIndex =
+            g_shvSleepLogCount.fetch_add(1, std::memory_order_relaxed);
+        if (sampleIndex < kSchedulerTimingLogSampleLimit ||
+            (adjustedMilliseconds != milliseconds &&
+             sampleIndex < (kSchedulerTimingLogSampleLimit + kRenderCadenceOutlierLogLimit)))
+        {
+            std::ostringstream message;
+            message << "shv.dll Sleep "
+                    << ((adjustedMilliseconds != milliseconds &&
+                         sampleIndex >= kSchedulerTimingLogSampleLimit)
+                            ? "override "
+                            : "sample ")
+                    << (sampleIndex + 1) << ": " << milliseconds << "->"
+                    << adjustedMilliseconds << "ms, caller=" << FormatAddress(caller);
+            Log(message.str());
+        }
     }
 
     if (g_originalShvSleep != nullptr)
@@ -4877,26 +4914,30 @@ VOID WINAPI HookedShvSleep(DWORD milliseconds)
 UINT_PTR WINAPI HookedShvSetTimer(HWND window, UINT_PTR timerId, UINT elapse,
                                   TIMERPROC timerProc)
 {
-    g_shvSetTimerHitCount.fetch_add(1, std::memory_order_relaxed);
     const auto caller = reinterpret_cast<std::uintptr_t>(_ReturnAddress());
     const UINT adjustedElapse =
         std::max(ResolveThirdPartyFramePacingDelayMs(g_config.enableFrameRateUnlock,
                                                      g_config.targetFrameRate, elapse),
                  1u);
-    const std::uint32_t sampleIndex =
-        g_shvSetTimerLogCount.fetch_add(1, std::memory_order_relaxed);
-    if (sampleIndex < kSchedulerTimingLogSampleLimit ||
-        (adjustedElapse != elapse &&
-         sampleIndex < (kSchedulerTimingLogSampleLimit + kRenderCadenceOutlierLogLimit)))
+    if (g_config.enableDiagnostics)
     {
-        std::ostringstream message;
-        message << "shv.dll SetTimer "
-                << ((adjustedElapse != elapse && sampleIndex >= kSchedulerTimingLogSampleLimit)
-                        ? "override "
-                        : "sample ")
-                << (sampleIndex + 1) << ": elapse=" << elapse << "->" << adjustedElapse
-                << "ms, caller=" << FormatAddress(caller);
-        Log(message.str());
+        g_shvSetTimerHitCount.fetch_add(1, std::memory_order_relaxed);
+        const std::uint32_t sampleIndex =
+            g_shvSetTimerLogCount.fetch_add(1, std::memory_order_relaxed);
+        if (sampleIndex < kSchedulerTimingLogSampleLimit ||
+            (adjustedElapse != elapse &&
+             sampleIndex < (kSchedulerTimingLogSampleLimit + kRenderCadenceOutlierLogLimit)))
+        {
+            std::ostringstream message;
+            message << "shv.dll SetTimer "
+                    << ((adjustedElapse != elapse &&
+                         sampleIndex >= kSchedulerTimingLogSampleLimit)
+                            ? "override "
+                            : "sample ")
+                    << (sampleIndex + 1) << ": elapse=" << elapse << "->"
+                    << adjustedElapse << "ms, caller=" << FormatAddress(caller);
+            Log(message.str());
+        }
     }
 
     if (g_originalShvSetTimer != nullptr)
@@ -4963,7 +5004,10 @@ FARPROC WINAPI HookedShvGetProcAddress(HMODULE module, LPCSTR procName)
 void __fastcall HookedShvMainLoop(void* self, void* /*edx*/, std::uintptr_t arg1,
                                   std::uintptr_t arg2)
 {
-    g_shvMainLoopHitCount.fetch_add(1, std::memory_order_relaxed);
+    if (g_config.enableDiagnostics)
+    {
+        g_shvMainLoopHitCount.fetch_add(1, std::memory_order_relaxed);
+    }
     LogRenderCadenceSample("shv.dll MainLoop", g_shvMainLoopCadence);
 
     if (g_originalShvMainLoop != nullptr)
@@ -5521,8 +5565,12 @@ HRESULT STDMETHODCALLTYPE HookedPresent(IDirect3DDevice9* device, const RECT* so
     }
 
     LARGE_INTEGER startCounter = {};
-    const bool measuredStart = ::QueryPerformanceCounter(&startCounter) != FALSE;
-    g_devicePresentHitCount.fetch_add(1, std::memory_order_relaxed);
+    const bool measuredStart =
+        g_config.enableDiagnostics && ::QueryPerformanceCounter(&startCounter) != FALSE;
+    if (g_config.enableDiagnostics)
+    {
+        g_devicePresentHitCount.fetch_add(1, std::memory_order_relaxed);
+    }
     const HRESULT hr =
         originalPresent(device, sourceRect, destRect, destWindowOverride, dirtyRegion);
     double callDurationMs = -1.0;
@@ -5552,8 +5600,12 @@ HRESULT STDMETHODCALLTYPE HookedPresentEx(IDirect3DDevice9Ex* device, const RECT
     }
 
     LARGE_INTEGER startCounter = {};
-    const bool measuredStart = ::QueryPerformanceCounter(&startCounter) != FALSE;
-    g_devicePresentExHitCount.fetch_add(1, std::memory_order_relaxed);
+    const bool measuredStart =
+        g_config.enableDiagnostics && ::QueryPerformanceCounter(&startCounter) != FALSE;
+    if (g_config.enableDiagnostics)
+    {
+        g_devicePresentExHitCount.fetch_add(1, std::memory_order_relaxed);
+    }
     const HRESULT hr = g_originalPresentEx(device, sourceRect, destRect, destWindowOverride,
                                            dirtyRegion, flags);
     double callDurationMs = -1.0;
@@ -5594,8 +5646,12 @@ HRESULT STDMETHODCALLTYPE HookedSwapChainPresent(IDirect3DSwapChain9* swapChain,
     }
 
     LARGE_INTEGER startCounter = {};
-    const bool measuredStart = ::QueryPerformanceCounter(&startCounter) != FALSE;
-    g_swapChainPresentHitCount.fetch_add(1, std::memory_order_relaxed);
+    const bool measuredStart =
+        g_config.enableDiagnostics && ::QueryPerformanceCounter(&startCounter) != FALSE;
+    if (g_config.enableDiagnostics)
+    {
+        g_swapChainPresentHitCount.fetch_add(1, std::memory_order_relaxed);
+    }
     const HRESULT hr = originalSwapChainPresent(swapChain, sourceRect, destRect,
                                                 destWindowOverride, dirtyRegion, flags);
     double callDurationMs = -1.0;
@@ -5628,8 +5684,12 @@ HRESULT STDMETHODCALLTYPE HookedEndScene(IDirect3DDevice9* device)
     }
 
     LARGE_INTEGER startCounter = {};
-    const bool measuredStart = ::QueryPerformanceCounter(&startCounter) != FALSE;
-    g_endSceneHitCount.fetch_add(1, std::memory_order_relaxed);
+    const bool measuredStart =
+        g_config.enableDiagnostics && ::QueryPerformanceCounter(&startCounter) != FALSE;
+    if (g_config.enableDiagnostics)
+    {
+        g_endSceneHitCount.fetch_add(1, std::memory_order_relaxed);
+    }
     const HRESULT hr = originalEndScene(device);
     double callDurationMs = -1.0;
     if (measuredStart)
@@ -6276,40 +6336,49 @@ void __fastcall HookedSchedulerLoopUpdate(void* objectPointer, void* reserved, f
             ? deltaPlan.effectiveDeltaSeconds
             : deltaSeconds;
 
-    std::call_once(g_schedulerLoopTargetLogOnce, [objectPointer]() {
-        LogSchedulerLoopTargets(objectPointer);
-    });
-
-    const std::uint32_t sampleIndex =
-        g_schedulerUpdateLogCount.fetch_add(1, std::memory_order_relaxed);
-    const float targetDeltaSeconds =
-        g_config.targetFrameRate > 0 ? (1.0f / static_cast<float>(g_config.targetFrameRate))
-                                     : (1.0f / 60.0f);
-    const bool logOutlier =
-        measuredElapsedSeconds > targetDeltaSeconds * 1.5f &&
-        sampleIndex < (kSchedulerTimingLogSampleLimit + kRenderCadenceOutlierLogLimit);
-    if (sampleIndex < kSchedulerTimingLogSampleLimit || logOutlier)
+    static thread_local std::uint32_t renderHookValidationCounter = 0;
+    if (++renderHookValidationCounter >= kSchedulerTimingSummaryInterval)
     {
-        std::ostringstream message;
-        message << "Scheduler update override "
-                << (logOutlier && sampleIndex >= kSchedulerTimingLogSampleLimit ? "outlier "
-                                                                                 : "sample ")
-                << (sampleIndex + 1)
-                << ": object=" << FormatAddress(reinterpret_cast<std::uintptr_t>(objectPointer))
-                << ", delta=" << deltaSeconds << "->" << effectiveDeltaSeconds
-                << "s, measured=" << measuredElapsedSeconds << "s, target=";
-        if (g_config.targetFrameRate == 0)
-        {
-            message << "unlocked";
-        }
-        else
-        {
-            message << g_config.targetFrameRate;
-        }
-        Log(message.str());
+        renderHookValidationCounter = 0;
+        EnsureRenderHooksStillInstalled();
     }
 
+    if (g_config.enableDiagnostics)
     {
+        std::call_once(g_schedulerLoopTargetLogOnce, [objectPointer]() {
+            LogSchedulerLoopTargets(objectPointer);
+        });
+
+        const std::uint32_t sampleIndex =
+            g_schedulerUpdateLogCount.fetch_add(1, std::memory_order_relaxed);
+        const float targetDeltaSeconds =
+            g_config.targetFrameRate > 0 ? (1.0f / static_cast<float>(g_config.targetFrameRate))
+                                         : (1.0f / 60.0f);
+        const bool logOutlier =
+            measuredElapsedSeconds > targetDeltaSeconds * 1.5f &&
+            sampleIndex < (kSchedulerTimingLogSampleLimit + kRenderCadenceOutlierLogLimit);
+        if (sampleIndex < kSchedulerTimingLogSampleLimit || logOutlier)
+        {
+            std::ostringstream message;
+            message << "Scheduler update override "
+                    << (logOutlier && sampleIndex >= kSchedulerTimingLogSampleLimit
+                            ? "outlier "
+                            : "sample ")
+                    << (sampleIndex + 1) << ": object="
+                    << FormatAddress(reinterpret_cast<std::uintptr_t>(objectPointer))
+                    << ", delta=" << deltaSeconds << "->" << effectiveDeltaSeconds
+                    << "s, measured=" << measuredElapsedSeconds << "s, target=";
+            if (g_config.targetFrameRate == 0)
+            {
+                message << "unlocked";
+            }
+            else
+            {
+                message << g_config.targetFrameRate;
+            }
+            Log(message.str());
+        }
+
         std::scoped_lock lock(g_timingDiagnosticsMutex);
         AccumulateCadenceSummary(&g_schedulerTimingSummary,
                                  static_cast<double>(measuredElapsedSeconds) * 1000.0,
@@ -6494,6 +6563,9 @@ bool InstallEngineFileHooks(HMODULE engineModule)
 bool ApplyAudioThreadSchedulingFix(HMODULE engineModule)
 {
     if (!g_config.improveAudioThreadScheduling || engineModule == nullptr)
+bool ApplyPromptIconConsumerFix(HMODULE engineModule)
+{
+    if (!g_config.enableKeyboardPromptLabels || engineModule == nullptr)
     {
         return false;
     }
@@ -6528,6 +6600,54 @@ bool ApplyAudioThreadSchedulingFix(HMODULE engineModule)
     FlushInstructionCache(GetCurrentProcess(), sleepInstruction, kPatchSpan);
     Log("Audio thread scheduling fix applied: StdAudio uses Sleep(0) at normal priority.");
     return true;
+#if defined(_M_IX86)
+    auto* const moduleBase = reinterpret_cast<std::uint8_t*>(engineModule);
+    auto* const tipIconBranch = moduleBase + kTipIconPromptOverrideBranchRva;
+    auto* const textureItemBranch = moduleBase + kTextureItemPromptOverrideBranchRva;
+
+    // Both consumers replace the resolver result with shv_buttonactionpc in
+    // keyboard/mouse mode. Keep the resolved resource unless it is null.
+    if (!MatchesCodeSignature(tipIconBranch - 0x19,
+                              {0x80, 0xB8, 0x78, 0x01, 0x00, 0x00, 0x00, 0x74,
+                               0x0E, 0xE8},
+                              "Tip icon prompt override context") ||
+        !MatchesCodeSignature(tipIconBranch - 4,
+                              {0x74, 0x09, 0x85, 0xED, 0x74, 0x05, 0xBD, 0xF0,
+                               0x81, 0x06, 0x11},
+                              "Tip icon prompt override branch") ||
+        !MatchesCodeSignature(textureItemBranch - 7,
+                              {0x80, 0xB9, 0x78, 0x01, 0x00, 0x00, 0x00, 0x74,
+                               0x0E, 0xE8},
+                              "Texture item prompt override context") ||
+        !MatchesCodeSignature(textureItemBranch + 0x0E,
+                              {0x74, 0x07, 0xBF, 0xF0, 0x81, 0x06, 0x11, 0xEB,
+                               0x04, 0x85, 0xFF},
+                              "Texture item prompt override branch"))
+    {
+        Log("Prompt icon consumer fix skipped: the stock instruction contexts did not match.");
+        return false;
+    }
+
+    const std::size_t patchSpan =
+        (kTextureItemPromptOverrideBranchRva + 2) - kTipIconPromptOverrideBranchRva;
+    DWORD oldProtection = 0;
+    if (VirtualProtect(tipIconBranch, patchSpan, PAGE_EXECUTE_READWRITE,
+                       &oldProtection) == FALSE)
+    {
+        Log("Prompt icon consumer fix skipped: target code was not writable.");
+        return false;
+    }
+
+    tipIconBranch[0] = 0x75;      // je -> jne: keep the resolved name unless null
+    textureItemBranch[1] = 0x15;  // je target -> null-checked consume path
+    DWORD ignored = 0;
+    VirtualProtect(tipIconBranch, patchSpan, oldProtection, &ignored);
+    FlushInstructionCache(GetCurrentProcess(), tipIconBranch, patchSpan);
+    Log("Prompt icon consumer fix applied: keyboard/mouse mode renders resolver-selected icons.");
+    return true;
+#else
+    return false;
+#endif
 }
 
 bool InstallPreciseSleepHook(HMODULE engineModule)
@@ -7030,6 +7150,7 @@ bool InstallHooks()
 
     bool installedAnyHook = false;
     installedAnyHook |= InstallEngineFileHooks(engineModule);
+    installedAnyHook |= ApplyPromptIconConsumerFix(engineModule);
     installedAnyHook |= InstallEngineHooks(engineModule);
     installedAnyHook |= InstallPreciseSleepHook(engineModule);
     installedAnyHook |= InstallSchedulerLoopUpdateHook(engineModule);
