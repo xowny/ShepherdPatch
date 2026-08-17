@@ -19,6 +19,7 @@ TEST_CASE(ParseConfigReadsBoolAndIntegerOverrides)
         "EnableRawMouseInput = false\n"
         "EnablePreciseSleepShim = false\n"
         "EnableCrashDumps = false\n"
+        "EnableDiagnostics = true\n"
         "EnableFrameRateUnlock = false\n"
         "SkipStartupLogos = true\n"
         "SynchronizeEngineVars = false\n"
@@ -60,6 +61,7 @@ TEST_CASE(ParseConfigReadsBoolAndIntegerOverrides)
     CHECK_TRUE(!config.enableRawMouseInput);
     CHECK_TRUE(!config.enablePreciseSleepShim);
     CHECK_TRUE(!config.enableCrashDumps);
+    CHECK_TRUE(config.enableDiagnostics);
     CHECK_TRUE(!config.enableFrameRateUnlock);
     CHECK_TRUE(config.skipStartupLogos);
     CHECK_TRUE(!config.synchronizeEngineVars);
@@ -110,6 +112,7 @@ TEST_CASE(ParseConfigUsesConservativeDefaultsWhenFileIsMissing)
     CHECK_TRUE(config.enableRawMouseInput);
     CHECK_TRUE(config.enablePreciseSleepShim);
     CHECK_TRUE(config.enableCrashDumps);
+    CHECK_TRUE(!config.enableDiagnostics);
     CHECK_TRUE(config.enableFrameRateUnlock);
     CHECK_TRUE(!config.skipStartupLogos);
     CHECK_TRUE(config.synchronizeEngineVars);

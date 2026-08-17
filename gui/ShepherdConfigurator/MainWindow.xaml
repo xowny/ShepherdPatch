@@ -524,7 +524,8 @@
                                                 <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Asks Windows not to down-prioritize critical game threads to save power." />
                                             </StackPanel>
                                             <StackPanel Grid.Column="1" HorizontalAlignment="Right" Width="220">
-                                                <TextBlock Style="{StaticResource SectionCaptionTextStyle}" HorizontalAlignment="Right" Text="Crash safety and scheduling" />
+                                                <CheckBox x:Name="EnableDiagnosticsToggle" Click="AnySettingChanged" Content="Diagnostic logging" HorizontalAlignment="Right" Style="{StaticResource HomecomingCheckBoxStyle}" />
+                                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="Records high-frequency timing data. Enable this only while diagnosing a problem." TextAlignment="Right" />
                                             </StackPanel>
                                         </Grid>
                                     </StackPanel>
