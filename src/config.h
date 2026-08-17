@@ -30,6 +30,7 @@ struct Config
     bool disableVsync = false;
     bool disableLegacyPeriodicIconicTimer = true;
     bool reduceLegacyWaitableTimerPolling = false;
+    bool improveAudioThreadScheduling = false;
     bool hardenLegacyGraphicsRecovery = true;
     bool hardenLegacyThreadWrapper = true;
     bool hardenDirectInputMouseDevice = true;
