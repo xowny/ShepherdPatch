@@ -1,6 +1,6 @@
 # ShepherdPatch
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 
 ShepherdPatch is a modernization and compatibility patch for the PC version of Silent Hill Homecoming.
